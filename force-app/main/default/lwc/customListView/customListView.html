@@ -1,0 +1,565 @@
+<template>
+    <div class="custom-list-view-container" style={containerStyle}>
+        <!-- Header Section -->
+        <div class="list-view-header">
+            <div class="header-left">
+                <div class="header-title-section">
+                    <div class="header-title-row">
+                        <h2 class="list-title">{listViewTitle}</h2>
+                        <span class="record-count">{recordCountLabel}</span>
+                        <template lwc:if={showSelectionActions}>
+                            <span class="selection-count">{selectedCountLabel}</span>
+                        </template>
+                    </div>
+                    <template lwc:if={hasSubtitle}>
+                        <p class="list-subtitle">{listViewSubtitle}</p>
+                    </template>
+                </div>
+            </div>
+            <div class="header-right">
+                <!-- Selection Actions -->
+                <template lwc:if={showSelectionActions}>
+                    <div class="selection-actions">
+                        <lightning-button
+                            label="Change Owner"
+                            variant="neutral"
+                            icon-name="utility:change_owner"
+                            onclick={openChangeOwnerModal}>
+                        </lightning-button>
+                        <lightning-button-icon
+                            icon-name="utility:close"
+                            variant="bare"
+                            size="medium"
+                            onclick={clearSelection}
+                            alternative-text="Clear selection"
+                            title="Clear selection">
+                        </lightning-button-icon>
+                    </div>
+                </template>
+                <template lwc:if={displaySearchBox}>
+                    <div class="search-container">
+                        <lightning-input
+                            type="search"
+                            variant="label-hidden"
+                            label="Search"
+                            placeholder="Search..."
+                            value={searchTerm}
+                            onchange={handleSearch}
+                            class="search-input-slds">
+                        </lightning-input>
+                    </div>
+                </template>
+                <template lwc:if={displayActionsButton}>
+                    <lightning-button-menu
+                        alternative-text="Actions"
+                        icon-name="utility:down"
+                        menu-alignment="right"
+                        class="actions-menu"
+                        onselect={handleActionSelect}>
+                        <lightning-menu-item value="refresh" label="Refresh"></lightning-menu-item>
+                        <template lwc:if={showExportPageOption}>
+                            <lightning-menu-item value="exportPage" label="Export Page to CSV"></lightning-menu-item>
+                        </template>
+                        <template lwc:if={showExportAllOption}>
+                            <lightning-menu-item value="exportAll" label="Export All to CSV"></lightning-menu-item>
+                        </template>
+                        <template lwc:if={selectableRows}>
+                            <lightning-menu-item value="changeOwner" label="Change Owner" disabled={noSelectedRecords}></lightning-menu-item>
+                        </template>
+                        <div class="slds-has-divider_top-space" role="separator"></div>
+                        <lightning-menu-item value="toggleWrap" label={wrapToggleLabel} icon-name="utility:rows"></lightning-menu-item>
+                        <template lwc:if={hasCustomColumnWidths}>
+                            <lightning-menu-item value="resetColumnWidths" label="Reset Column Widths" icon-name="utility:undo"></lightning-menu-item>
+                        </template>
+                    </lightning-button-menu>
+                </template>
+            </div>
+        </div>
+
+        <!-- Quick Filters Bar -->
+        <template lwc:if={hasQuickFilters}>
+            <div class="filter-bar" onclick={closeFilterDropdowns}>
+                <div class="filter-bar-content">
+                    <template for:each={filterConfigurations} for:item="filter">
+                        <div key={filter.fieldName} class="filter-item" onclick={stopPropagation}>
+                            <span class="filter-label">{filter.label}</span>
+                            <div class="filter-dropdown-container">
+                                <button 
+                                    type="button"
+                                    class="filter-dropdown-button"
+                                    data-field={filter.fieldName}
+                                    onclick={toggleFilterDropdown}>
+                                    <span class="filter-button-label">{filter.buttonLabel}</span>
+                                    <lightning-icon 
+                                        icon-name="utility:chevrondown" 
+                                        size="xx-small"
+                                        class="filter-chevron">
+                                    </lightning-icon>
+                                </button>
+                                <template lwc:if={filter.isOpen}>
+                                    <div class="filter-dropdown-menu">
+                                        <template for:each={filter.options} for:item="option">
+                                            <label key={option.optionKey} class="filter-option">
+                                                <input 
+                                                    type="checkbox"
+                                                    class="filter-checkbox"
+                                                    data-field={option.fieldName}
+                                                    data-value={option.value}
+                                                    checked={option.isChecked}
+                                                    onchange={handleFilterOptionChange}
+                                                />
+                                                <span class="filter-option-label">{option.label}</span>
+                                            </label>
+                                        </template>
+                                        <template lwc:if={filter.hasSelections}>
+                                            <div class="filter-clear-container">
+                                                <button 
+                                                    type="button"
+                                                    class="filter-clear-button"
+                                                    data-field={filter.fieldName}
+                                                    onclick={clearFilterSelection}>
+                                                    Clear
+                                                </button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <template lwc:if={hasActiveFilters}>
+                        <lightning-button
+                            label="Clear All Filters"
+                            variant="base"
+                            icon-name="utility:clear"
+                            class="clear-filters-btn"
+                            onclick={clearAllFilters}>
+                        </lightning-button>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <!-- Loading Spinner -->
+        <template lwc:if={isLoading}>
+            <div class="loading-container">
+                <lightning-spinner alternative-text="Loading" size="medium"></lightning-spinner>
+            </div>
+        </template>
+
+        <!-- Error Message -->
+        <template lwc:if={errorMessage}>
+            <div class="error-container">
+                <lightning-icon icon-name="utility:error" size="small" variant="error"></lightning-icon>
+                <span class="error-text">{errorMessage}</span>
+            </div>
+        </template>
+
+        <!-- Data Table -->
+        <template lwc:if={hasRecords}>
+            <div class="table-wrapper">
+                <table class={tableClass} role="grid" aria-label={listViewTitle}>
+                    <thead>
+                        <tr class="table-header-row">
+                            <!-- File Type Icon Column Header -->
+                            <template lwc:if={showFileTypeColumn}>
+                                <th class="table-header-cell file-icon-cell" scope="col">
+                                    <span class="header-label">Type</span>
+                                </th>
+                            </template>
+                            <!-- Checkbox Column Header -->
+                            <template lwc:if={selectableRows}>
+                                <th class="table-header-cell checkbox-cell" scope="col">
+                                    <input
+                                        type="checkbox"
+                                        class="row-checkbox select-all-checkbox"
+                                        checked={allSelectedOnPage}
+                                        onchange={handleSelectAll}
+                                        title="Select all on this page"
+                                        aria-label="Select all records on this page"
+                                    />
+                                </th>
+                            </template>
+                            <template for:each={columns} for:item="column">
+                                <th key={column.fieldName} class="table-header-cell resizable-header" scope="col" aria-sort={column.ariaSort} style={column.headerStyle}>
+                                    <div class="header-cell-content">
+                                        <span class="header-label">{column.label}</span>
+                                        <template lwc:if={column.sortable}>
+                                            <template lwc:if={allowUserSort}>
+                                                <button
+                                                    class={column.sortButtonClass}
+                                                    onclick={handleSort}
+                                                    data-field={column.fieldName}
+                                                    title={column.sortTitle}>
+                                                    <lightning-icon
+                                                        icon-name={column.sortIcon}
+                                                        size="xx-small"
+                                                        class="sort-icon">
+                                                    </lightning-icon>
+                                                </button>
+                                            </template>
+                                        </template>
+                                    </div>
+                                    <div
+                                        class="resize-handle"
+                                        data-field={column.fieldName}
+                                        onmousedown={handleResizeMouseDown}
+                                        role="separator"
+                                        aria-orientation="vertical"
+                                        tabindex="-1">
+                                    </div>
+                                </th>
+                            </template>
+                            <!-- Row Actions Header -->
+                            <template lwc:if={displayRowActions}>
+                                <th class="table-header-cell actions-header-cell" scope="col">
+                                    <span class="header-label">Actions</span>
+                                </th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={displayRecords} for:item="record">
+                            <tr
+                                key={record.Id}
+                                class={record.rowClass}
+                                onclick={handleRowClick}
+                                data-id={record.Id}>
+                                <!-- File Type Icon Column -->
+                                <template lwc:if={showFileTypeColumn}>
+                                    <td class="table-cell file-icon-cell">
+                                        <template lwc:if={record.hasFileIcon}>
+                                            <lightning-icon 
+                                                icon-name={record.fileIcon}
+                                                size="small"
+                                                class="file-type-icon"
+                                                title={record.fileExtension}>
+                                            </lightning-icon>
+                                        </template>
+                                    </td>
+                                </template>
+                                <!-- Checkbox Column -->
+                                <template lwc:if={selectableRows}>
+                                    <td class="table-cell checkbox-cell">
+                                        <input
+                                            type="checkbox"
+                                            class="row-checkbox"
+                                            data-id={record.Id}
+                                            checked={record.isSelected}
+                                            onchange={handleRowSelect}
+                                            aria-label="Select record"
+                                        />
+                                    </td>
+                                </template>
+                                <template for:each={record.displayFields} for:item="field">
+                                    <td key={field.key} class={tableCellClass}>
+                                        <template lwc:if={field.isLink}>
+                                            <a 
+                                                href={field.linkUrl}
+                                                class="record-link"
+                                                onclick={handleLinkClick}
+                                                data-id={field.linkRecordId}>
+                                                {field.displayValue}
+                                            </a>
+                                        </template>
+                                        <template lwc:elseif={field.isPill}>
+                                            <span class="pill" style={field.pillStyle}>
+                                                {field.displayValue}
+                                            </span>
+                                        </template>
+                                        <template lwc:elseif={field.isBoolean}>
+                                            <lightning-icon 
+                                                icon-name={field.booleanIcon}
+                                                size="x-small"
+                                                class={field.booleanClass}>
+                                            </lightning-icon>
+                                        </template>
+                                        <template lwc:elseif={field.isCurrency}>
+                                            <lightning-formatted-number
+                                                value={field.rawValue}
+                                                format-style="currency">
+                                            </lightning-formatted-number>
+                                        </template>
+                                        <template lwc:elseif={field.isPercent}>
+                                            <lightning-formatted-number 
+                                                value={field.rawValue}
+                                                format-style="percent"
+                                                maximum-fraction-digits="2">
+                                            </lightning-formatted-number>
+                                        </template>
+                                        <template lwc:elseif={field.isDate}>
+                                            <lightning-formatted-date-time
+                                                value={field.rawValue}
+                                                year="numeric"
+                                                month="short"
+                                                day="2-digit">
+                                            </lightning-formatted-date-time>
+                                        </template>
+                                        <template lwc:elseif={field.isDateTime}>
+                                            <lightning-formatted-date-time
+                                                value={field.rawValue}
+                                                year="numeric"
+                                                month="short"
+                                                day="2-digit"
+                                                hour="2-digit"
+                                                minute="2-digit">
+                                            </lightning-formatted-date-time>
+                                        </template>
+                                        <template lwc:elseif={field.isEmail}>
+                                            <a href={field.emailHref} class="email-link">{field.displayValue}</a>
+                                        </template>
+                                        <template lwc:elseif={field.isPhone}>
+                                            <a href={field.phoneHref} class="phone-link">{field.displayValue}</a>
+                                        </template>
+                                        <template lwc:elseif={field.isUrl}>
+                                            <a href={field.displayValue} target="_blank" class="url-link">{field.urlDisplay}</a>
+                                        </template>
+                                        <template lwc:else>
+                                            <span class="cell-value">{field.displayValue}</span>
+                                        </template>
+                                    </td>
+                                </template>
+                                <!-- Row Actions Cell -->
+                                <template lwc:if={displayRowActions}>
+                                    <td class="table-cell actions-cell" onclick={stopPropagation}>
+                                        <lightning-button-menu
+                                            alternative-text="Row Actions"
+                                            icon-size="x-small"
+                                            menu-alignment="right"
+                                            variant="border-filled"
+                                            onselect={handleRowActionSelect}
+                                            data-record-id={record.Id}
+                                            data-content-document-id={record.contentDocumentId}
+                                            data-content-version-id={record.contentVersionId}>
+                                            <!-- File-specific actions (shown first for file objects) -->
+                                            <template lwc:if={isFileObject}>
+                                                <lightning-menu-item 
+                                                    value="viewFile" 
+                                                    label="View File"
+                                                    icon-name="utility:preview">
+                                                </lightning-menu-item>
+                                                <lightning-menu-item 
+                                                    value="downloadFile" 
+                                                    label="Download File"
+                                                    icon-name="utility:download">
+                                                </lightning-menu-item>
+                                                <div class="slds-has-divider_top-space" role="separator"></div>
+                                            </template>
+                                            <!-- Standard record actions -->
+                                            <lightning-menu-item 
+                                                value="view" 
+                                                label="View Record"
+                                                icon-name="utility:open">
+                                            </lightning-menu-item>
+                                            <lightning-menu-item 
+                                                value="edit" 
+                                                label="Edit Record"
+                                                icon-name="utility:edit">
+                                            </lightning-menu-item>
+                                            <lightning-menu-item 
+                                                value="changeOwner" 
+                                                label="Change Owner"
+                                                icon-name="utility:change_owner">
+                                            </lightning-menu-item>
+                                        </lightning-button-menu>
+                                    </td>
+                                </template>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <template lwc:if={showPagination}>
+                <div class="pagination-container">
+                    <div class="pagination-info">
+                        Showing {paginationStartRecord} - {paginationEndRecord} of {totalRecords}
+                    </div>
+                    <div class="pagination-controls">
+                        <lightning-button-icon
+                            icon-name="utility:jump_to_left"
+                            variant="border"
+                            size="small"
+                            alternative-text="First Page"
+                            title="First Page"
+                            disabled={isFirstPage}
+                            onclick={handleFirstPage}
+                            class="pagination-btn-slds">
+                        </lightning-button-icon>
+                        <lightning-button-icon
+                            icon-name="utility:chevronleft"
+                            variant="border"
+                            size="small"
+                            alternative-text="Previous Page"
+                            title="Previous Page"
+                            disabled={isFirstPage}
+                            onclick={handlePreviousPage}
+                            class="pagination-btn-slds">
+                        </lightning-button-icon>
+                        <span class="page-indicator">
+                            Page {currentPage} of {totalPages}
+                        </span>
+                        <lightning-button-icon
+                            icon-name="utility:chevronright"
+                            variant="border"
+                            size="small"
+                            alternative-text="Next Page"
+                            title="Next Page"
+                            disabled={isLastPage}
+                            onclick={handleNextPage}
+                            class="pagination-btn-slds">
+                        </lightning-button-icon>
+                        <lightning-button-icon
+                            icon-name="utility:jump_to_right"
+                            variant="border"
+                            size="small"
+                            alternative-text="Last Page"
+                            title="Last Page"
+                            disabled={isLastPage}
+                            onclick={handleLastPage}
+                            class="pagination-btn-slds">
+                        </lightning-button-icon>
+                    </div>
+                </div>
+            </template>
+        </template>
+
+        <!-- Empty State -->
+        <template lwc:if={showEmptyState}>
+            <div class="empty-state">
+                <lightning-icon
+                    icon-name={emptyStateIcon}
+                    size="large"
+                    class="empty-icon">
+                </lightning-icon>
+                <p class="empty-text">{emptyStateMessage}</p>
+                <template lwc:if={emptyStateSubtext}>
+                    <p class="empty-subtext">{emptyStateSubtext}</p>
+                </template>
+                <template lwc:if={hasActiveFilters}>
+                    <lightning-button
+                        label="Clear All Filters"
+                        variant="neutral"
+                        icon-name="utility:clear"
+                        onclick={clearAllFilters}
+                        class="slds-m-top_medium">
+                    </lightning-button>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- Change Owner Modal -->
+    <template lwc:if={showChangeOwnerModal}>
+        <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open slds-modal_medium" aria-modal="true" aria-labelledby="change-owner-modal-heading" onkeydown={handleModalKeydown}>
+            <div class="slds-modal__container">
+                <!-- Modal Header -->
+                <div class="slds-modal__header">
+                    <lightning-button-icon
+                        icon-name="utility:close"
+                        variant="bare-inverse"
+                        class="slds-modal__close"
+                        onclick={closeChangeOwnerModal}
+                        alternative-text="Close">
+                    </lightning-button-icon>
+                    <h1 id="change-owner-modal-heading" class="slds-modal__title slds-hyphenate">Change Owner</h1>
+                    <p class="slds-text-body_small slds-m-top_x-small">
+                        Change owner for {selectedCount} selected record(s)
+                    </p>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="slds-modal__content slds-p-around_medium">
+                    <!-- User Search -->
+                    <lightning-input
+                        type="search"
+                        label="Search for New Owner"
+                        placeholder="Search users by name or email..."
+                        value={userSearchTerm}
+                        onchange={handleUserSearch}>
+                    </lightning-input>
+
+                    <!-- Loading Spinner for User Search -->
+                    <template lwc:if={isSearchingUsers}>
+                        <div class="slds-m-top_medium slds-align_absolute-center">
+                            <lightning-spinner alternative-text="Searching..." size="small"></lightning-spinner>
+                        </div>
+                    </template>
+
+                    <!-- User Search Results -->
+                    <template lwc:if={hasUserSearchResults}>
+                        <div class="user-search-results slds-m-top_medium">
+                            <ul class="slds-listbox slds-listbox_vertical">
+                                <template for:each={userSearchResults} for:item="user">
+                                    <li key={user.Id} 
+                                        class="slds-listbox__item"
+                                        onclick={handleUserSelect}
+                                        data-id={user.Id}>
+                                        <div class={user.userItemClass}>
+                                            <lightning-avatar
+                                                src={user.SmallPhotoUrl}
+                                                fallback-icon-name="standard:user"
+                                                alternative-text={user.Name}
+                                                size="medium">
+                                            </lightning-avatar>
+                                            <div class="user-info">
+                                                <span class="user-name">{user.Name}</span>
+                                                <span class="user-email">{user.Email}</span>
+                                                <template lwc:if={user.Title}>
+                                                    <span class="user-title">{user.Title}</span>
+                                                </template>
+                                            </div>
+                                            <template lwc:if={user.isSelected}>
+                                                <lightning-icon 
+                                                    icon-name="utility:check" 
+                                                    size="x-small"
+                                                    class="selected-icon">
+                                                </lightning-icon>
+                                            </template>
+                                        </div>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
+
+                    <!-- Selected Owner Display -->
+                    <template lwc:if={selectedNewOwner}>
+                        <div class="selected-owner-display slds-m-top_medium">
+                            <span class="slds-text-title_caps slds-m-bottom_x-small">New Owner</span>
+                            <div class="selected-owner-card">
+                                <lightning-avatar
+                                    src={selectedNewOwner.SmallPhotoUrl}
+                                    fallback-icon-name="standard:user"
+                                    alternative-text={selectedNewOwner.Name}
+                                    size="medium">
+                                </lightning-avatar>
+                                <div class="user-info">
+                                    <span class="user-name">{selectedNewOwner.Name}</span>
+                                    <span class="user-email">{selectedNewOwner.Email}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="slds-modal__footer">
+                    <lightning-button 
+                        label="Cancel" 
+                        onclick={closeChangeOwnerModal}>
+                    </lightning-button>
+                    <lightning-button 
+                        label={changeOwnerButtonLabel}
+                        variant="brand" 
+                        onclick={handleConfirmOwnerChange}
+                        disabled={isConfirmOwnerChangeDisabled}
+                        class="slds-m-left_x-small">
+                    </lightning-button>
+                </div>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+</template>

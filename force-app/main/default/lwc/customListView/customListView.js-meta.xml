@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>65.0</apiVersion>
+    <isExposed>true</isExposed>
+    <masterLabel>Custom List View</masterLabel>
+    <description>A modern, configurable list view component to replace the standard related list. Configure columns, sorting, search, pagination, and data visibility through the Lightning App Builder.</description>
+    
+    <targets>
+        <target>lightning__RecordPage</target>
+        <target>lightning__AppPage</target>
+        <target>lightning__HomePage</target>
+    </targets>
+    
+    <targetConfigs>
+        <targetConfig targets="lightning__RecordPage,lightning__AppPage,lightning__HomePage">
+            
+            <!-- Core Configuration -->
+            <property 
+                name="soqlQuery" 
+                type="String" 
+                label="SOQL Query"
+                description="Base SOQL query. Use {recordId} for current record context and {currentUserId} for logged-in user's ID. Example: SELECT Id, Name FROM Task WHERE OwnerId = {currentUserId}"
+                required="true"/>
+            
+            <property 
+                name="listViewTitle" 
+                type="String" 
+                label="List View Title"
+                description="Title displayed at the top of the list view"
+                default="List View"/>
+            
+            <property 
+                name="listViewSubtitle" 
+                type="String" 
+                label="List View Subtitle"
+                description="Smaller grey text displayed below the title and record count"
+                default=""/>
+            
+            <!-- Data Visibility -->
+            <property 
+                name="bypassSharing" 
+                type="Boolean" 
+                label="Bypass Sharing Rules"
+                description="When enabled, the component will show all records regardless of sharing rules (without sharing mode). Use with caution - only enable when users need to see records they don't normally have access to."
+                default="false"/>
+            
+            <!-- UI Customization -->
+            <property
+                name="columnTextWrap"
+                type="String"
+                label="Column Text Overflow"
+                description="Controls how long text is handled in columns. 'clip' truncates with ellipsis (default). 'wrap' wraps text to multiple lines."
+                default="clip"
+                datasource="clip,wrap"/>
+
+            <property
+                name="hoverRowColorHex"
+                type="String"
+                label="Hover Row Color (Hex)"
+                description="Hex color code for row hover highlight. Example: #006EC8"
+                default="#f0f7ff"/>
+            
+            <property 
+                name="displaySearchBox" 
+                type="Boolean" 
+                label="Display Search Box"
+                description="Toggle search box visibility"
+                default="true"/>
+            
+            <property
+                name="displayActionsButton"
+                type="Boolean"
+                label="Display Actions Button"
+                description="Toggle actions menu (Refresh, Export) visibility"
+                default="true"/>
+
+            <property
+                name="disableExportPage"
+                type="Boolean"
+                label="Disable Export Page to CSV"
+                description="When enabled, hides the 'Export Page to CSV' option from the actions menu."
+                default="false"/>
+
+            <property
+                name="disableExportAll"
+                type="Boolean"
+                label="Disable Export All to CSV"
+                description="When enabled, hides the 'Export All to CSV' option from the actions menu."
+                default="false"/>
+
+            <property
+                name="selectableRows" 
+                type="Boolean" 
+                label="Selectable Rows"
+                description="Enable row selection with checkboxes. When enabled, users can select multiple records and perform bulk actions like Change Owner."
+                default="false"/>
+            
+            <property 
+                name="displayRowActions" 
+                type="Boolean" 
+                label="Display Row Actions"
+                description="Display a row actions menu with View, Edit, and Change Owner options on each row."
+                default="true"/>
+            
+            <!-- Pagination & Sorting -->
+            <property 
+                name="recordCountPerPage" 
+                type="Integer" 
+                label="Records Per Page"
+                description="Number of records to display per page. Pagination appears if more records exist. Maximum: 200"
+                default="20"
+                min="1"
+                max="200"/>
+            
+            <property 
+                name="defaultSortableColumn" 
+                type="String" 
+                label="Default Sort Column"
+                description="API name of the field to sort by default. Leave blank for no default sorting."
+                default=""/>
+            
+            <property 
+                name="allowUserSort" 
+                type="Boolean" 
+                label="Allow User Sorting"
+                description="Allow users to change the sort column by clicking headers"
+                default="true"/>
+            
+            <!-- Column 1 -->
+            <property 
+                name="column1FieldApiName" 
+                type="String" 
+                label="Column 1 - Field API Name"
+                description="API name of the field to display in column 1. Example: Name, Custom_Field__c, Account.Name"/>
+            
+            <property 
+                name="column1UiLabel" 
+                type="String" 
+                label="Column 1 - Custom Label"
+                description="Custom label for column 1. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column1DisplayAsPill" 
+                type="Boolean" 
+                label="Column 1 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column1PillColors" 
+                type="String" 
+                label="Column 1 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2. Example: Won:#2e844a,Lost:#ba0517,Pending:#fe9339"/>
+            
+            <property 
+                name="column1FilterValues" 
+                type="String" 
+                label="Column 1 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values. Example: Open,Closed,Pending"/>
+            
+            <!-- Column 2 -->
+            <property 
+                name="column2FieldApiName" 
+                type="String" 
+                label="Column 2 - Field API Name"
+                description="API name of the field to display in column 2"/>
+            
+            <property 
+                name="column2UiLabel" 
+                type="String" 
+                label="Column 2 - Custom Label"
+                description="Custom label for column 2. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column2DisplayAsPill" 
+                type="Boolean" 
+                label="Column 2 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column2PillColors" 
+                type="String" 
+                label="Column 2 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column2FilterValues" 
+                type="String" 
+                label="Column 2 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 3 -->
+            <property 
+                name="column3FieldApiName" 
+                type="String" 
+                label="Column 3 - Field API Name"
+                description="API name of the field to display in column 3"/>
+            
+            <property 
+                name="column3UiLabel" 
+                type="String" 
+                label="Column 3 - Custom Label"
+                description="Custom label for column 3. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column3DisplayAsPill" 
+                type="Boolean" 
+                label="Column 3 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column3PillColors" 
+                type="String" 
+                label="Column 3 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column3FilterValues" 
+                type="String" 
+                label="Column 3 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 4 -->
+            <property 
+                name="column4FieldApiName" 
+                type="String" 
+                label="Column 4 - Field API Name"
+                description="API name of the field to display in column 4"/>
+            
+            <property 
+                name="column4UiLabel" 
+                type="String" 
+                label="Column 4 - Custom Label"
+                description="Custom label for column 4. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column4DisplayAsPill" 
+                type="Boolean" 
+                label="Column 4 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column4PillColors" 
+                type="String" 
+                label="Column 4 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column4FilterValues" 
+                type="String" 
+                label="Column 4 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 5 -->
+            <property 
+                name="column5FieldApiName" 
+                type="String" 
+                label="Column 5 - Field API Name"
+                description="API name of the field to display in column 5"/>
+            
+            <property 
+                name="column5UiLabel" 
+                type="String" 
+                label="Column 5 - Custom Label"
+                description="Custom label for column 5. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column5DisplayAsPill" 
+                type="Boolean" 
+                label="Column 5 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column5PillColors" 
+                type="String" 
+                label="Column 5 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column5FilterValues" 
+                type="String" 
+                label="Column 5 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 6 -->
+            <property 
+                name="column6FieldApiName" 
+                type="String" 
+                label="Column 6 - Field API Name"
+                description="API name of the field to display in column 6"/>
+            
+            <property 
+                name="column6UiLabel" 
+                type="String" 
+                label="Column 6 - Custom Label"
+                description="Custom label for column 6. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column6DisplayAsPill" 
+                type="Boolean" 
+                label="Column 6 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column6PillColors" 
+                type="String" 
+                label="Column 6 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column6FilterValues" 
+                type="String" 
+                label="Column 6 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 7 -->
+            <property 
+                name="column7FieldApiName" 
+                type="String" 
+                label="Column 7 - Field API Name"
+                description="API name of the field to display in column 7"/>
+            
+            <property 
+                name="column7UiLabel" 
+                type="String" 
+                label="Column 7 - Custom Label"
+                description="Custom label for column 7. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column7DisplayAsPill" 
+                type="Boolean" 
+                label="Column 7 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column7PillColors" 
+                type="String" 
+                label="Column 7 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column7FilterValues" 
+                type="String" 
+                label="Column 7 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 8 -->
+            <property 
+                name="column8FieldApiName" 
+                type="String" 
+                label="Column 8 - Field API Name"
+                description="API name of the field to display in column 8"/>
+            
+            <property 
+                name="column8UiLabel" 
+                type="String" 
+                label="Column 8 - Custom Label"
+                description="Custom label for column 8. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column8DisplayAsPill" 
+                type="Boolean" 
+                label="Column 8 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column8PillColors" 
+                type="String" 
+                label="Column 8 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column8FilterValues" 
+                type="String" 
+                label="Column 8 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 9 -->
+            <property 
+                name="column9FieldApiName" 
+                type="String" 
+                label="Column 9 - Field API Name"
+                description="API name of the field to display in column 9"/>
+            
+            <property 
+                name="column9UiLabel" 
+                type="String" 
+                label="Column 9 - Custom Label"
+                description="Custom label for column 9. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column9DisplayAsPill" 
+                type="Boolean" 
+                label="Column 9 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column9PillColors" 
+                type="String" 
+                label="Column 9 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column9FilterValues" 
+                type="String" 
+                label="Column 9 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+            <!-- Column 10 -->
+            <property 
+                name="column10FieldApiName" 
+                type="String" 
+                label="Column 10 - Field API Name"
+                description="API name of the field to display in column 10"/>
+            
+            <property 
+                name="column10UiLabel" 
+                type="String" 
+                label="Column 10 - Custom Label"
+                description="Custom label for column 10. Leave blank to use the default field label."/>
+            
+            <property 
+                name="column10DisplayAsPill" 
+                type="Boolean" 
+                label="Column 10 - Display as Pill"
+                description="Display picklist values as colored pills/badges"
+                default="false"/>
+            
+            <property 
+                name="column10PillColors" 
+                type="String" 
+                label="Column 10 - Pill Color Mapping"
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2"/>
+            
+            <property 
+                name="column10FilterValues" 
+                type="String" 
+                label="Column 10 - Quick Filter Values"
+                description="Enable quick filter dropdown for this column. Enter comma-separated picklist values."/>
+            
+        </targetConfig>
+    </targetConfigs>
+</LightningComponentBundle>
