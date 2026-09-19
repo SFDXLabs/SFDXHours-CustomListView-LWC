@@ -2,16 +2,16 @@
 
 A modern, highly configurable Lightning Web Component that replaces the standard Salesforce related list and list view with an enhanced, feature-rich UI. Designed for admins who want full control through the Lightning App Builder and end users who want a polished, interactive experience.
 
-**Modern UI**
-<img width="2472" height="1008" alt="522379313-8c2d4399-92a6-412c-a09f-ff53817f28bd" src="https://github.com/user-attachments/assets/c062e9e5-28d6-44d7-8698-286ea19312b8" />
+**Modern UI** \
+<img width="1327" height="517" alt="image" src="https://github.com/user-attachments/assets/adad99bc-4dc9-4543-afdc-f42bb10dc569" />
 
-**Selectable rows with visual indicators**
-<img width="2476" height="1030" alt="522380847-10c27ae8-43b4-4339-aeb9-4e223833e99d" src="https://github.com/user-attachments/assets/9d22f118-03a4-4e87-9d5d-f4df571df446" />
+**Selectable rows with visual indicators** \
+<img width="1331" height="521" alt="image" src="https://github.com/user-attachments/assets/59619258-0d5a-4136-bfb7-d1e23c06a0c4" />
 
-**Intelligent file type detection**
-<img width="1004" height="421" alt="522584215-6164f1b9-829d-491b-8a7b-01e92029251c" src="https://github.com/user-attachments/assets/927c46c1-7f4f-4fcf-8199-2edb369c296f" />
+**Intelligent file type detection** \
+<img width="1325" height="471" alt="image" src="https://github.com/user-attachments/assets/74c60dce-f8a9-4466-a1ad-9b206cac8120" />
 
-**Highly customisable**
+**Highly customisable** \
 <img width="582" height="597" alt="522584586-cbda8b87-f4b5-41f1-8aef-0212b1474c57" src="https://github.com/user-attachments/assets/68a269f7-7eaf-405c-a87c-a40fb56b2044" />
 
 ---
