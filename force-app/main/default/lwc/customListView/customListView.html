@@ -3,17 +3,48 @@
         <!-- Header Section -->
         <div class="list-view-header">
             <div class="header-left">
+                <template lwc:if={hasHeaderIcon}>
+                    <template lwc:if={isUtilityHeaderIcon}>
+                        <span class="header-icon header-icon-utility" style={headerIconStyle}>
+                            <lightning-icon
+                                icon-name={headerIconName}
+                                size="x-small"
+                                variant="inverse"
+                                alternative-text={listViewTitle}>
+                            </lightning-icon>
+                        </span>
+                    </template>
+                    <template lwc:else>
+                        <lightning-icon
+                            icon-name={headerIconName}
+                            size="medium"
+                            class="header-icon"
+                            style={headerIconStyle}
+                            alternative-text={listViewTitle}>
+                        </lightning-icon>
+                    </template>
+                </template>
                 <div class="header-title-section">
                     <div class="header-title-row">
                         <h2 class="list-title">{listViewTitle}</h2>
-                        <span class="record-count">{recordCountLabel}</span>
                         <template lwc:if={showSelectionActions}>
-                            <span class="selection-count">{selectedCountLabel}</span>
+                            <span class="slds-badge selection-count">{selectedCountLabel}</span>
                         </template>
                     </div>
                     <template lwc:if={hasSubtitle}>
                         <p class="list-subtitle">{listViewSubtitle}</p>
                     </template>
+                    <p class="list-meta">
+                        <span>{recordCountLabel}</span>
+                        <template lwc:if={sortedByLabel}>
+                            <span class="meta-sep">•</span>
+                            <span>Sorted by {sortedByLabel}</span>
+                        </template>
+                        <template lwc:if={lastRefreshed}>
+                            <span class="meta-sep">•</span>
+                            <span>Updated&nbsp;<lightning-relative-date-time value={lastRefreshed}></lightning-relative-date-time></span>
+                        </template>
+                    </p>
                 </div>
             </div>
             <div class="header-right">
@@ -42,7 +73,7 @@
                             type="search"
                             variant="label-hidden"
                             label="Search"
-                            placeholder="Search..."
+                            placeholder="Search this list..."
                             value={searchTerm}
                             onchange={handleSearch}
                             class="search-input-slds">
@@ -50,13 +81,20 @@
                     </div>
                 </template>
                 <template lwc:if={displayActionsButton}>
+                    <lightning-button-icon
+                        icon-name="utility:refresh"
+                        variant="border-filled"
+                        alternative-text="Refresh"
+                        title="Refresh"
+                        onclick={loadData}
+                        class="refresh-btn">
+                    </lightning-button-icon>
                     <lightning-button-menu
                         alternative-text="Actions"
                         icon-name="utility:down"
                         menu-alignment="right"
                         class="actions-menu"
                         onselect={handleActionSelect}>
-                        <lightning-menu-item value="refresh" label="Refresh"></lightning-menu-item>
                         <template lwc:if={showExportPageOption}>
                             <lightning-menu-item value="exportPage" label="Export Page to CSV"></lightning-menu-item>
                         </template>
@@ -66,11 +104,9 @@
                         <template lwc:if={selectableRows}>
                             <lightning-menu-item value="changeOwner" label="Change Owner" disabled={noSelectedRecords}></lightning-menu-item>
                         </template>
-                        <div class="slds-has-divider_top-space" role="separator"></div>
+                        <lightning-menu-divider></lightning-menu-divider>
                         <lightning-menu-item value="toggleWrap" label={wrapToggleLabel} icon-name="utility:rows"></lightning-menu-item>
-                        <template lwc:if={hasCustomColumnWidths}>
-                            <lightning-menu-item value="resetColumnWidths" label="Reset Column Widths" icon-name="utility:undo"></lightning-menu-item>
-                        </template>
+                        <lightning-menu-item value="resetColumnWidths" label="Reset Column Widths" icon-name="utility:undo" disabled={noCustomColumnWidths}></lightning-menu-item>
                     </lightning-button-menu>
                 </template>
             </div>
@@ -78,53 +114,18 @@
 
         <!-- Quick Filters Bar -->
         <template lwc:if={hasQuickFilters}>
-            <div class="filter-bar" onclick={closeFilterDropdowns}>
+            <div class="filter-bar">
                 <div class="filter-bar-content">
                     <template for:each={filterConfigurations} for:item="filter">
-                        <div key={filter.fieldName} class="filter-item" onclick={stopPropagation}>
-                            <span class="filter-label">{filter.label}</span>
-                            <div class="filter-dropdown-container">
-                                <button 
-                                    type="button"
-                                    class="filter-dropdown-button"
-                                    data-field={filter.fieldName}
-                                    onclick={toggleFilterDropdown}>
-                                    <span class="filter-button-label">{filter.buttonLabel}</span>
-                                    <lightning-icon 
-                                        icon-name="utility:chevrondown" 
-                                        size="xx-small"
-                                        class="filter-chevron">
-                                    </lightning-icon>
-                                </button>
-                                <template lwc:if={filter.isOpen}>
-                                    <div class="filter-dropdown-menu">
-                                        <template for:each={filter.options} for:item="option">
-                                            <label key={option.optionKey} class="filter-option">
-                                                <input 
-                                                    type="checkbox"
-                                                    class="filter-checkbox"
-                                                    data-field={option.fieldName}
-                                                    data-value={option.value}
-                                                    checked={option.isChecked}
-                                                    onchange={handleFilterOptionChange}
-                                                />
-                                                <span class="filter-option-label">{option.label}</span>
-                                            </label>
-                                        </template>
-                                        <template lwc:if={filter.hasSelections}>
-                                            <div class="filter-clear-container">
-                                                <button 
-                                                    type="button"
-                                                    class="filter-clear-button"
-                                                    data-field={filter.fieldName}
-                                                    onclick={clearFilterSelection}>
-                                                    Clear
-                                                </button>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </template>
-                            </div>
+                        <div key={filter.fieldName} class="filter-item">
+                            <lightning-combobox
+                                name={filter.fieldName}
+                                label={filter.label}
+                                value={filter.value}
+                                options={filter.options}
+                                data-field={filter.fieldName}
+                                onchange={handleFilterChange}>
+                            </lightning-combobox>
                         </div>
                     </template>
                     <template lwc:if={hasActiveFilters}>
@@ -140,25 +141,62 @@
             </div>
         </template>
 
-        <!-- Loading Spinner -->
-        <template lwc:if={isLoading}>
-            <div class="loading-container">
-                <lightning-spinner alternative-text="Loading" size="medium"></lightning-spinner>
+        <!-- Skeleton Loading Rows -->
+        <template lwc:if={showSkeleton}>
+            <div class="table-wrapper" aria-busy="true" aria-label="Loading">
+                <table class="slds-table slds-table_bordered slds-no-row-hover data-table">
+                    <thead>
+                        <tr class="table-header-row">
+                            <template lwc:if={selectableRows}>
+                                <th class="table-header-cell checkbox-cell" scope="col"></th>
+                            </template>
+                            <template for:each={columns} for:item="column">
+                                <th key={column.fieldName} class="table-header-cell" scope="col">
+                                    <span class="header-label">{column.label}</span>
+                                </th>
+                            </template>
+                            <template lwc:if={displayRowActions}>
+                                <th class="table-header-cell actions-header-cell" scope="col"></th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={skeletonRows} for:item="row">
+                            <tr key={row.key} class="skeleton-row">
+                                <template lwc:if={selectableRows}>
+                                    <td class="table-cell checkbox-cell"><div class="skeleton-bar skeleton-bar-icon"></div></td>
+                                </template>
+                                <template for:each={row.cells} for:item="cellKey">
+                                    <td key={cellKey} class="table-cell"><div class="skeleton-bar"></div></td>
+                                </template>
+                                <template lwc:if={displayRowActions}>
+                                    <td class="table-cell actions-cell"><div class="skeleton-bar skeleton-bar-icon"></div></td>
+                                </template>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
             </div>
         </template>
 
         <!-- Error Message -->
         <template lwc:if={errorMessage}>
-            <div class="error-container">
-                <lightning-icon icon-name="utility:error" size="small" variant="error"></lightning-icon>
-                <span class="error-text">{errorMessage}</span>
+            <div class="slds-scoped-notification slds-scoped-notification_light slds-media slds-media_center" role="alert">
+                <div class="slds-media__figure">
+                    <lightning-icon icon-name="utility:error" size="small" variant="error" alternative-text="Error"></lightning-icon>
+                </div>
+                <div class="slds-media__body">{errorMessage}</div>
             </div>
         </template>
 
         <!-- Data Table -->
         <template lwc:if={hasRecords}>
-            <div class="table-wrapper">
-                <table class={tableClass} role="grid" aria-label={listViewTitle}>
+            <div class="table-region">
+            <template lwc:if={isLoading}>
+                <lightning-spinner alternative-text="Loading" size="medium"></lightning-spinner>
+            </template>
+            <div class="table-wrapper" aria-busy={isLoading}>
+                <table class={tableClass} style={tableStyle} aria-label={listViewTitle}>
                     <thead>
                         <tr class="table-header-row">
                             <!-- File Type Icon Column Header -->
@@ -170,18 +208,18 @@
                             <!-- Checkbox Column Header -->
                             <template lwc:if={selectableRows}>
                                 <th class="table-header-cell checkbox-cell" scope="col">
-                                    <input
+                                    <lightning-input
                                         type="checkbox"
-                                        class="row-checkbox select-all-checkbox"
+                                        variant="label-hidden"
+                                        label="Select all records on this page"
                                         checked={allSelectedOnPage}
                                         onchange={handleSelectAll}
-                                        title="Select all on this page"
-                                        aria-label="Select all records on this page"
-                                    />
+                                        class="table-checkbox">
+                                    </lightning-input>
                                 </th>
                             </template>
                             <template for:each={columns} for:item="column">
-                                <th key={column.fieldName} class="table-header-cell resizable-header" scope="col" aria-sort={column.ariaSort} style={column.headerStyle}>
+                                <th key={column.fieldName} class="table-header-cell resizable-header" scope="col" data-col={column.fieldName} aria-sort={column.ariaSort} style={column.headerStyle}>
                                     <div class="header-cell-content">
                                         <span class="header-label">{column.label}</span>
                                         <template lwc:if={column.sortable}>
@@ -190,7 +228,8 @@
                                                     class={column.sortButtonClass}
                                                     onclick={handleSort}
                                                     data-field={column.fieldName}
-                                                    title={column.sortTitle}>
+                                                    title={column.sortTitle}
+                                                    aria-label={column.sortTitle}>
                                                     <lightning-icon
                                                         icon-name={column.sortIcon}
                                                         size="xx-small"
@@ -203,7 +242,11 @@
                                     <div
                                         class="resize-handle"
                                         data-field={column.fieldName}
-                                        onmousedown={handleResizeMouseDown}
+                                        onpointerdown={handleResizeStart}
+                                        onpointermove={handleResizeMove}
+                                        onpointerup={handleResizeEnd}
+                                        onpointercancel={handleResizeEnd}
+                                        title="Drag to resize column"
                                         role="separator"
                                         aria-orientation="vertical"
                                         tabindex="-1">
@@ -220,11 +263,7 @@
                     </thead>
                     <tbody>
                         <template for:each={displayRecords} for:item="record">
-                            <tr
-                                key={record.Id}
-                                class={record.rowClass}
-                                onclick={handleRowClick}
-                                data-id={record.Id}>
+                            <tr key={record.Id} class={record.rowClass}>
                                 <!-- File Type Icon Column -->
                                 <template lwc:if={showFileTypeColumn}>
                                     <td class="table-cell file-icon-cell">
@@ -241,14 +280,15 @@
                                 <!-- Checkbox Column -->
                                 <template lwc:if={selectableRows}>
                                     <td class="table-cell checkbox-cell">
-                                        <input
+                                        <lightning-input
                                             type="checkbox"
-                                            class="row-checkbox"
+                                            variant="label-hidden"
+                                            label="Select record"
                                             data-id={record.Id}
                                             checked={record.isSelected}
                                             onchange={handleRowSelect}
-                                            aria-label="Select record"
-                                        />
+                                            class="table-checkbox">
+                                        </lightning-input>
                                     </td>
                                 </template>
                                 <template for:each={record.displayFields} for:item="field">
@@ -263,15 +303,16 @@
                                             </a>
                                         </template>
                                         <template lwc:elseif={field.isPill}>
-                                            <span class="pill" style={field.pillStyle}>
+                                            <span class="slds-badge pill" style={field.pillStyle}>
                                                 {field.displayValue}
                                             </span>
                                         </template>
                                         <template lwc:elseif={field.isBoolean}>
-                                            <lightning-icon 
+                                            <lightning-icon
                                                 icon-name={field.booleanIcon}
                                                 size="x-small"
-                                                class={field.booleanClass}>
+                                                class={field.booleanClass}
+                                                alternative-text={field.displayValue}>
                                             </lightning-icon>
                                         </template>
                                         <template lwc:elseif={field.isCurrency}>
@@ -317,6 +358,18 @@
                                         <template lwc:else>
                                             <span class="cell-value">{field.displayValue}</span>
                                         </template>
+                                        <template lwc:if={enableCellCopy}>
+                                            <lightning-button-icon
+                                                icon-name="utility:copy_to_clipboard"
+                                                variant="border-filled"
+                                                size="small"
+                                                class="cell-copy-btn"
+                                                alternative-text="Copy to clipboard"
+                                                title="Copy to clipboard"
+                                                data-value={field.displayValue}
+                                                onclick={handleCopyCell}>
+                                            </lightning-button-icon>
+                                        </template>
                                     </td>
                                 </template>
                                 <!-- Row Actions Cell -->
@@ -343,7 +396,7 @@
                                                     label="Download File"
                                                     icon-name="utility:download">
                                                 </lightning-menu-item>
-                                                <div class="slds-has-divider_top-space" role="separator"></div>
+                                                <lightning-menu-divider></lightning-menu-divider>
                                             </template>
                                             <!-- Standard record actions -->
                                             <lightning-menu-item 
@@ -369,17 +422,32 @@
                     </tbody>
                 </table>
             </div>
+            </div>
 
             <!-- Pagination -->
             <template lwc:if={showPagination}>
                 <div class="pagination-container">
                     <div class="pagination-info">
-                        Showing {paginationStartRecord} - {paginationEndRecord} of {totalRecords}
+                        Showing {paginationStartRecord} - {paginationEndRecord} of {totalRecordsLabel}
+                        <template lwc:if={pageLimitHint}>
+                            <div class="slds-text-body_small" role="status">{pageLimitHint}</div>
+                        </template>
+                    </div>
+                    <div class="page-size-control">
+                        <lightning-combobox
+                            label="Rows per page"
+                            variant="label-hidden"
+                            value={pageSizeValue}
+                            options={pageSizeOptions}
+                            onchange={handlePageSizeChange}
+                            class="page-size-combobox">
+                        </lightning-combobox>
+                        <span class="page-size-label">per page</span>
                     </div>
                     <div class="pagination-controls">
                         <lightning-button-icon
                             icon-name="utility:jump_to_left"
-                            variant="border"
+                            variant="border-filled"
                             size="small"
                             alternative-text="First Page"
                             title="First Page"
@@ -389,7 +457,7 @@
                         </lightning-button-icon>
                         <lightning-button-icon
                             icon-name="utility:chevronleft"
-                            variant="border"
+                            variant="border-filled"
                             size="small"
                             alternative-text="Previous Page"
                             title="Previous Page"
@@ -402,7 +470,7 @@
                         </span>
                         <lightning-button-icon
                             icon-name="utility:chevronright"
-                            variant="border"
+                            variant="border-filled"
                             size="small"
                             alternative-text="Next Page"
                             title="Next Page"
@@ -412,7 +480,7 @@
                         </lightning-button-icon>
                         <lightning-button-icon
                             icon-name="utility:jump_to_right"
-                            variant="border"
+                            variant="border-filled"
                             size="small"
                             alternative-text="Last Page"
                             title="Last Page"
@@ -427,16 +495,18 @@
 
         <!-- Empty State -->
         <template lwc:if={showEmptyState}>
-            <div class="empty-state">
+            <div class="slds-illustration slds-illustration_small slds-p-vertical_xx-large">
                 <lightning-icon
                     icon-name={emptyStateIcon}
                     size="large"
                     class="empty-icon">
                 </lightning-icon>
-                <p class="empty-text">{emptyStateMessage}</p>
-                <template lwc:if={emptyStateSubtext}>
-                    <p class="empty-subtext">{emptyStateSubtext}</p>
-                </template>
+                <div class="slds-text-longform">
+                    <h3 class="slds-text-heading_medium">{emptyStateMessage}</h3>
+                    <template lwc:if={emptyStateSubtext}>
+                        <p class="slds-text-body_regular">{emptyStateSubtext}</p>
+                    </template>
+                </div>
                 <template lwc:if={hasActiveFilters}>
                     <lightning-button
                         label="Clear All Filters"
@@ -452,9 +522,8 @@
 
     <!-- Change Owner Modal -->
     <template lwc:if={showChangeOwnerModal}>
-        <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open slds-modal_medium" aria-modal="true" aria-labelledby="change-owner-modal-heading" onkeydown={handleModalKeydown}>
+        <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open" aria-modal="true" aria-labelledby="change-owner-modal-heading" onkeydown={handleModalKeydown}>
             <div class="slds-modal__container">
-                <!-- Modal Header -->
                 <div class="slds-modal__header">
                     <lightning-button-icon
                         icon-name="utility:close"
@@ -465,94 +534,31 @@
                     </lightning-button-icon>
                     <h1 id="change-owner-modal-heading" class="slds-modal__title slds-hyphenate">Change Owner</h1>
                     <p class="slds-text-body_small slds-m-top_x-small">
-                        Change owner for {selectedCount} selected record(s)
+                        Change owner for {changeOwnerCount} selected record(s)
                     </p>
                 </div>
-
-                <!-- Modal Body -->
-                <div class="slds-modal__content slds-p-around_medium">
-                    <!-- User Search -->
-                    <lightning-input
-                        type="search"
-                        label="Search for New Owner"
-                        placeholder="Search users by name or email..."
-                        value={userSearchTerm}
-                        onchange={handleUserSearch}>
-                    </lightning-input>
-
-                    <!-- Loading Spinner for User Search -->
-                    <template lwc:if={isSearchingUsers}>
-                        <div class="slds-m-top_medium slds-align_absolute-center">
-                            <lightning-spinner alternative-text="Searching..." size="small"></lightning-spinner>
-                        </div>
+                <div class="slds-modal__content slds-p-around_medium change-owner-modal-content">
+                    <template lwc:if={changeOwnerError}>
+                        <div class="slds-text-color_error slds-m-bottom_small" role="alert">{changeOwnerError}</div>
                     </template>
-
-                    <!-- User Search Results -->
-                    <template lwc:if={hasUserSearchResults}>
-                        <div class="user-search-results slds-m-top_medium">
-                            <ul class="slds-listbox slds-listbox_vertical">
-                                <template for:each={userSearchResults} for:item="user">
-                                    <li key={user.Id} 
-                                        class="slds-listbox__item"
-                                        onclick={handleUserSelect}
-                                        data-id={user.Id}>
-                                        <div class={user.userItemClass}>
-                                            <lightning-avatar
-                                                src={user.SmallPhotoUrl}
-                                                fallback-icon-name="standard:user"
-                                                alternative-text={user.Name}
-                                                size="medium">
-                                            </lightning-avatar>
-                                            <div class="user-info">
-                                                <span class="user-name">{user.Name}</span>
-                                                <span class="user-email">{user.Email}</span>
-                                                <template lwc:if={user.Title}>
-                                                    <span class="user-title">{user.Title}</span>
-                                                </template>
-                                            </div>
-                                            <template lwc:if={user.isSelected}>
-                                                <lightning-icon 
-                                                    icon-name="utility:check" 
-                                                    size="x-small"
-                                                    class="selected-icon">
-                                                </lightning-icon>
-                                            </template>
-                                        </div>
-                                    </li>
-                                </template>
-                            </ul>
-                        </div>
-                    </template>
-
-                    <!-- Selected Owner Display -->
-                    <template lwc:if={selectedNewOwner}>
-                        <div class="selected-owner-display slds-m-top_medium">
-                            <span class="slds-text-title_caps slds-m-bottom_x-small">New Owner</span>
-                            <div class="selected-owner-card">
-                                <lightning-avatar
-                                    src={selectedNewOwner.SmallPhotoUrl}
-                                    fallback-icon-name="standard:user"
-                                    alternative-text={selectedNewOwner.Name}
-                                    size="medium">
-                                </lightning-avatar>
-                                <div class="user-info">
-                                    <span class="user-name">{selectedNewOwner.Name}</span>
-                                    <span class="user-email">{selectedNewOwner.Email}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
+                    <lightning-record-picker
+                        label="New Owner"
+                        placeholder="Search users by name..."
+                        object-api-name="User"
+                        filter={userFilter}
+                        display-info={userDisplayInfo}
+                        matching-info={userMatchingInfo}
+                        onchange={handleOwnerChange}>
+                    </lightning-record-picker>
                 </div>
-
-                <!-- Modal Footer -->
                 <div class="slds-modal__footer">
-                    <lightning-button 
-                        label="Cancel" 
+                    <lightning-button
+                        label="Cancel"
                         onclick={closeChangeOwnerModal}>
                     </lightning-button>
-                    <lightning-button 
+                    <lightning-button
                         label={changeOwnerButtonLabel}
-                        variant="brand" 
+                        variant="brand"
                         onclick={handleConfirmOwnerChange}
                         disabled={isConfirmOwnerChangeDisabled}
                         class="slds-m-left_x-small">
@@ -562,4 +568,5 @@
         </section>
         <div class="slds-backdrop slds-backdrop_open"></div>
     </template>
+
 </template>

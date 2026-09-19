@@ -11,11 +11,16 @@ public inherited sharing class CustomListViewController {
     // Constants & Cache
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static Map<String, Schema.SObjectType> globalDescribeCache;
+    private static final Map<String, Schema.SObjectType> SOBJECT_TYPE_CACHE = new Map<String, Schema.SObjectType>();
+    private static final Map<String, Map<String, Schema.SObjectField>> FIELD_MAP_CACHE = new Map<String, Map<String, Schema.SObjectField>>();
+    private static final Pattern SOQL_IDENTIFIER = Pattern.compile('^[A-Za-z0-9_\\.]+$');
 
     private static final Integer MAX_PAGE_SIZE = 200;
-    private static final Integer MAX_SEARCH_RESULTS = 20;
-    private static final Integer MIN_SEARCH_LENGTH = 2;
+    // SOQL rejects OFFSET above 2000, so deeper rows are only reachable via keyset paging
+    private static final Integer MAX_OFFSET = 2000;
+    // COUNT() rows count against the 50,000 query-row limit and throw beyond it, so
+    // totals are capped and reported as "10,000+" (the native list view does the same)
+    @TestVisible private static Integer countCap = 10000;
     private static final Set<String> UNSORTABLE_TYPES = new Set<String>{'TEXTAREA', 'MULTIPICKLIST', 'LOCATION'};
     private static final Set<Schema.DisplayType> SEARCHABLE_TYPES = new Set<Schema.DisplayType>{
         Schema.DisplayType.STRING,
@@ -36,6 +41,7 @@ public inherited sharing class CustomListViewController {
     public class QueryResult {
         @AuraEnabled public List<SObject> records { get; set; }
         @AuraEnabled public Integer totalCount { get; set; }
+        @AuraEnabled public Boolean totalCountCapped { get; set; }
         @AuraEnabled public Map<String, FieldMetadata> fieldMetadata { get; set; }
         @AuraEnabled public String errorMessage { get; set; }
         @AuraEnabled public Boolean success { get; set; }
@@ -43,6 +49,7 @@ public inherited sharing class CustomListViewController {
         public QueryResult() {
             this.records = new List<SObject>();
             this.totalCount = 0;
+            this.totalCountCapped = false;
             this.fieldMetadata = new Map<String, FieldMetadata>();
             this.success = true;
         }
@@ -94,6 +101,9 @@ public inherited sharing class CustomListViewController {
         public Integer pageSize;
         public Integer pageNumber;
         public Map<String, List<String>> filters;
+        // Keyset mode: rows come back in Id order after afterId, with no OFFSET or count
+        public Boolean keysetPaging = false;
+        public String afterId;
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -169,12 +179,7 @@ public inherited sharing class CustomListViewController {
             params.pageNumber = pageNumber != null && pageNumber > 0 ? pageNumber : 1;
             params.filters = parseFilters(filtersJson);
             
-            // Select appropriate executor based on sharing setting
-            IQueryExecutor executor = (bypassSharing == true) 
-                ? (IQueryExecutor) new WithoutSharingExecutor() 
-                : (IQueryExecutor) new WithSharingExecutor();
-            
-            result = executor.execute(params);
+            result = selectExecutor(bypassSharing).execute(params);
             
         } catch (Exception e) {
             result.success = false;
@@ -183,28 +188,61 @@ public inherited sharing class CustomListViewController {
         
         return result;
     }
-    
+
     /**
-     * @description Searches for active users by name or email
-     * @param searchTerm The search term to filter users
-     * @return List of matching User records
+     * @description Returns one export batch in Id order using keyset paging (WHERE Id > afterId),
+     *              which has no OFFSET ceiling. Callers pass the last Id of the previous batch and
+     *              stop when fewer than batchSize records come back. No total count is computed.
+     * @param soqlQuery The base SOQL query string
+     * @param recordId Optional record ID to inject into query
+     * @param searchTerm Optional search term for filtering
+     * @param filtersJson JSON string of field filters
+     * @param bypassSharing If true, executes query without sharing rules
+     * @param afterId Last record Id of the previous batch (blank for the first batch)
+     * @param batchSize Number of records per batch (capped at 200)
+     * @return QueryResult containing the batch of records
      */
-    @AuraEnabled(cacheable=true)
-    public static List<User> searchUsers(String searchTerm) {
-        if (String.isBlank(searchTerm) || searchTerm.length() < MIN_SEARCH_LENGTH) {
-            return new List<User>();
+    @AuraEnabled(cacheable=false)
+    public static QueryResult executeExportBatch(
+        String soqlQuery,
+        String recordId,
+        String searchTerm,
+        String filtersJson,
+        Boolean bypassSharing,
+        String afterId,
+        Integer batchSize
+    ) {
+        QueryResult result = new QueryResult();
+
+        try {
+            QueryParams params = new QueryParams();
+            params.soqlQuery = soqlQuery;
+            params.recordId = recordId;
+            params.searchTerm = searchTerm;
+            params.pageSize = Math.min(batchSize != null && batchSize > 0 ? batchSize : MAX_PAGE_SIZE, MAX_PAGE_SIZE);
+            params.pageNumber = 1;
+            params.filters = parseFilters(filtersJson);
+            params.keysetPaging = true;
+            // Id.valueOf rejects anything that is not a real Id before it reaches the query
+            params.afterId = String.isBlank(afterId) ? null : String.valueOf(Id.valueOf(afterId));
+
+            result = selectExecutor(bypassSharing).execute(params);
+
+        } catch (Exception e) {
+            result.success = false;
+            result.errorMessage = e.getMessage();
         }
-        
-        String searchPattern = '%' + String.escapeSingleQuotes(searchTerm.trim()) + '%';
-        
-        return [
-            SELECT Id, Name, Email, SmallPhotoUrl, Title
-            FROM User
-            WHERE IsActive = true
-                AND (Name LIKE :searchPattern OR Email LIKE :searchPattern)
-            ORDER BY Name ASC
-            LIMIT :MAX_SEARCH_RESULTS
-        ];
+
+        return result;
+    }
+
+    /**
+     * @description Selects the executor matching the component's sharing setting
+     */
+    private static IQueryExecutor selectExecutor(Boolean bypassSharing) {
+        return (bypassSharing == true)
+            ? (IQueryExecutor) new WithoutSharingExecutor()
+            : (IQueryExecutor) new WithSharingExecutor();
     }
     
     /**
@@ -243,28 +281,43 @@ public inherited sharing class CustomListViewController {
         return result;
     }
     
-    /**
-     * @description Gets the record URL for navigation (kept for backward compatibility)
-     * @param recordId The record ID
-     * @return The relative URL to the record
-     */
-    @AuraEnabled(cacheable=true)
-    public static String getRecordUrl(String recordId) {
-        return '/' + String.escapeSingleQuotes(recordId);
-    }
-    
     // ═══════════════════════════════════════════════════════════════════════════
     // Schema Helpers
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @description Returns cached global describe to avoid repeated expensive calls within a transaction
+     * @description Resolves an SObjectType via a targeted describe (avoids the cost of
+     *              Schema.getGlobalDescribe on large orgs). Returns null for unknown objects.
      */
-    private static Map<String, Schema.SObjectType> getCachedGlobalDescribe() {
-        if (globalDescribeCache == null) {
-            globalDescribeCache = Schema.getGlobalDescribe();
+    private static Schema.SObjectType getSObjectType(String objectName) {
+        String key = objectName.toLowerCase();
+        if (!SOBJECT_TYPE_CACHE.containsKey(key)) {
+            Schema.SObjectType resolved;
+            try {
+                resolved = Schema.describeSObjects(
+                    new List<String>{ objectName }, SObjectDescribeOptions.DEFERRED
+                )[0].getSObjectType();
+            } catch (Exception e) {
+                resolved = null;
+            }
+            SOBJECT_TYPE_CACHE.put(key, resolved);
         }
-        return globalDescribeCache;
+        return SOBJECT_TYPE_CACHE.get(key);
+    }
+
+    /**
+     * @description Returns the object's field map, cached per transaction so metadata,
+     *              search, and validation logic share a single describe call.
+     */
+    private static Map<String, Schema.SObjectField> getFieldMap(String objectName) {
+        String key = objectName.toLowerCase();
+        if (!FIELD_MAP_CACHE.containsKey(key)) {
+            Schema.SObjectType sObjectType = getSObjectType(objectName);
+            FIELD_MAP_CACHE.put(key, sObjectType == null
+                ? new Map<String, Schema.SObjectField>()
+                : sObjectType.getDescribe().fields.getMap());
+        }
+        return FIELD_MAP_CACHE.get(key);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -290,8 +343,7 @@ public inherited sharing class CustomListViewController {
         List<String> queryFields = extractFields(processedQuery);
         
         // Validate object exists
-        Schema.SObjectType sObjectType = getCachedGlobalDescribe().get(objectName);
-        if (sObjectType == null) {
+        if (getSObjectType(objectName) == null) {
             throw newAuraException('Invalid object: ' + objectName);
         }
         
@@ -301,12 +353,22 @@ public inherited sharing class CustomListViewController {
         // Build and execute queries
         String whereClause = buildWhereClause(processedQuery, params.searchTerm, queryFields, objectName, params.filters);
         
-        // Execute count query
-        String countQuery = 'SELECT COUNT() FROM ' + String.escapeSingleQuotes(objectName);
-        if (String.isNotBlank(whereClause)) {
-            countQuery += ' WHERE ' + whereClause;
+        if (params.keysetPaging) {
+            if (String.isNotBlank(params.afterId)) {
+                whereClause = combineConditions(whereClause, 'Id > \'' + params.afterId + '\'');
+            }
+        } else {
+            // Execute count query (objectName is regex-validated to word characters only).
+            // LIMIT cap + 1 distinguishes "exactly the cap" from "more than the cap".
+            String countQuery = 'SELECT COUNT() FROM ' + objectName;
+            if (String.isNotBlank(whereClause)) {
+                countQuery += ' WHERE ' + whereClause;
+            }
+            countQuery += ' LIMIT ' + (countCap + 1);
+            Integer counted = Database.countQuery(countQuery);
+            result.totalCountCapped = counted > countCap;
+            result.totalCount = Math.min(counted, countCap);
         }
-        result.totalCount = Database.countQuery(countQuery);
         
         // Execute data query
         String dataQuery = buildDataQuery(queryFields, objectName, whereClause, params);
@@ -478,20 +540,31 @@ public inherited sharing class CustomListViewController {
             ? 'SELECT ' + String.join(fields, ', ')
             : 'SELECT Id, ' + String.join(fields, ', ');
         
-        String query = selectClause + ' FROM ' + String.escapeSingleQuotes(objectName);
-        
+        String query = selectClause + ' FROM ' + objectName;
+
         if (String.isNotBlank(whereClause)) {
             query += ' WHERE ' + whereClause;
         }
-        
-        // Add ORDER BY
+
+        if (params.keysetPaging) {
+            return query + ' ORDER BY Id ASC LIMIT ' + params.pageSize;
+        }
+
+        // Add ORDER BY - sort field must be a plain (dotted) API name, not arbitrary SOQL
         if (String.isNotBlank(params.sortField)) {
+            if (!SOQL_IDENTIFIER.matcher(params.sortField).matches()) {
+                throw newAuraException('Invalid sort field: ' + params.sortField);
+            }
             String direction = (params.sortDirection == 'DESC') ? 'DESC NULLS LAST' : 'ASC NULLS FIRST';
-            query += ' ORDER BY ' + String.escapeSingleQuotes(params.sortField) + ' ' + direction;
+            query += ' ORDER BY ' + params.sortField + ' ' + direction;
         }
         
         // Add LIMIT and OFFSET
         Integer offset = (params.pageNumber - 1) * params.pageSize;
+        if (offset > MAX_OFFSET) {
+            throw newAuraException('Only the first ' + (MAX_OFFSET + params.pageSize) +
+                ' rows can be paged through. Use search or filters to narrow the list.');
+        }
         query += ' LIMIT ' + params.pageSize + ' OFFSET ' + offset;
         
         return query;
@@ -505,20 +578,20 @@ public inherited sharing class CustomListViewController {
         
         for (String fieldName : filters.keySet()) {
             List<String> values = filters.get(fieldName);
-            
-            if (values == null || values.isEmpty()) continue;
-            
-            // Escape field name for safety
-            String safeFieldName = String.escapeSingleQuotes(fieldName);
-            
+
+            // Field names must be plain API names - reject anything else outright
+            if (values == null || values.isEmpty() || !SOQL_IDENTIFIER.matcher(fieldName).matches()) {
+                continue;
+            }
+
             if (values.size() == 1) {
-                conditions.add(safeFieldName + ' = \'' + String.escapeSingleQuotes(values[0]) + '\'');
+                conditions.add(fieldName + ' = \'' + String.escapeSingleQuotes(values[0]) + '\'');
             } else {
                 List<String> escapedValues = new List<String>();
                 for (String val : values) {
                     escapedValues.add('\'' + String.escapeSingleQuotes(val) + '\'');
                 }
-                conditions.add(safeFieldName + ' IN (' + String.join(escapedValues, ', ') + ')');
+                conditions.add(fieldName + ' IN (' + String.join(escapedValues, ', ') + ')');
             }
         }
         
@@ -531,26 +604,18 @@ public inherited sharing class CustomListViewController {
     private static String buildSearchFilter(List<String> fields, String searchTerm, String objectName) {
         List<String> conditions = new List<String>();
         String escapedTerm = '%' + String.escapeSingleQuotes(searchTerm) + '%';
-        
-        try {
-            Schema.SObjectType sObjectType = getCachedGlobalDescribe().get(objectName);
-            if (sObjectType == null) return '';
-            
-            Map<String, Schema.SObjectField> fieldMap = sObjectType.getDescribe().fields.getMap();
-            
-            for (String fieldName : fields) {
-                // Skip relationship fields
-                if (fieldName.contains('.')) continue;
-                
-                Schema.SObjectField field = fieldMap.get(fieldName.toLowerCase());
-                if (field != null && SEARCHABLE_TYPES.contains(field.getDescribe().getType())) {
-                    conditions.add(String.escapeSingleQuotes(fieldName) + ' LIKE \'' + escapedTerm + '\'');
-                }
+        Map<String, Schema.SObjectField> fieldMap = getFieldMap(objectName);
+
+        for (String fieldName : fields) {
+            // Skip relationship fields
+            if (fieldName.contains('.')) continue;
+
+            Schema.SObjectField field = fieldMap.get(fieldName.toLowerCase());
+            if (field != null && SEARCHABLE_TYPES.contains(field.getDescribe().getType())) {
+                conditions.add(fieldName + ' LIKE \'' + escapedTerm + '\'');
             }
-        } catch (Exception e) {
-            System.debug(LoggingLevel.WARN, 'Error building search filter: ' + e.getMessage());
         }
-        
+
         return conditions.isEmpty() ? '' : String.join(conditions, ' OR ');
     }
     
@@ -563,13 +628,10 @@ public inherited sharing class CustomListViewController {
      */
     private static Map<String, FieldMetadata> getFieldMetadata(String objectName, List<String> fields) {
         Map<String, FieldMetadata> metadata = new Map<String, FieldMetadata>();
-        
-        Schema.SObjectType sObjectType = getCachedGlobalDescribe().get(objectName);
-        if (sObjectType == null) return metadata;
-        
-        Schema.DescribeSObjectResult describeResult = sObjectType.getDescribe();
-        Map<String, Schema.SObjectField> fieldMap = describeResult.fields.getMap();
-        
+
+        Map<String, Schema.SObjectField> fieldMap = getFieldMap(objectName);
+        if (fieldMap.isEmpty()) return metadata;
+
         for (String fieldName : fields) {
             FieldMetadata fm = new FieldMetadata();
             

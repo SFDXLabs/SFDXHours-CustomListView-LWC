@@ -6,15 +6,20 @@ import { LightningElement, api, track } from 'lwc';
 import { NavigationMixin } from 'lightning/navigation';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import executeQuery from '@salesforce/apex/CustomListViewController.executeQuery';
+import executeExportBatch from '@salesforce/apex/CustomListViewController.executeExportBatch';
 import changeRecordsOwner from '@salesforce/apex/CustomListViewController.changeRecordsOwner';
-import searchUsers from '@salesforce/apex/CustomListViewController.searchUsers';
 
 // Constants
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_HOVER_COLOR = '#f0f7ff';
-const DEFAULT_PILL_COLOR = { background: '#e5e5e5', text: '#444444' };
+const DEFAULT_PILL_COLOR = { background: '#f3f3f3', text: '#514f4d' };
 const DEBOUNCE_DELAY = 300;
-const MIN_USER_SEARCH_LENGTH = 2;
+const MIN_COLUMN_WIDTH = 60;
+// Apex caps a page at 200 rows and SOQL caps OFFSET at 2000
+const EXPORT_BATCH_SIZE = 200;
+const MAX_SOQL_OFFSET = 2000;
+// Ceiling for one CSV - each batch is a server round trip and the file is built in memory
+const MAX_EXPORT_ROWS = 50000;
 
 // File extension to icon mapping
 const FILE_ICON_MAP = {
@@ -53,6 +58,8 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     @api soqlQuery = '';
     @api listViewTitle = 'List View';
     @api listViewSubtitle = '';
+    @api headerIconName = '';
+    @api headerIconBackgroundColor = '';
     @api hoverRowColorHex = DEFAULT_HOVER_COLOR;
     @api displaySearchBox = false;
     @api displayActionsButton = false;
@@ -61,6 +68,7 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     @api allowUserSort = false;
     @api selectableRows = false;
     @api displayRowActions = false;
+    @api enableCellCopy = false;
     @api bypassSharing = false;
     @api columnTextWrap = 'clip'; // 'clip' or 'wrap'
     @api disableExportPage = false;
@@ -94,6 +102,7 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
 
     records = [];
     totalRecords = 0;
+    totalCountCapped = false; // true when Apex capped the count (shown as "10,000+")
     currentPage = 1;
     sortField = '';
     sortDirection = 'ASC';
@@ -104,35 +113,39 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     @track selectedRecordIds = new Set();
     allSelectedOnPage = false;
     @track activeFilters = {};
-    openFilterDropdown = null;
     showChangeOwnerModal = false;
-    userSearchTerm = '';
-    userSearchResults = [];
-    selectedNewOwner = null;
-    isSearchingUsers = false;
+    newOwnerId = null;
     isChangingOwner = false;
+    changeOwnerError = '';
     isFileObject = false;
     fileObjectType = null;
+    lastRefreshed = null;
 
     // User-facing display preferences
     userTextWrap = null; // null = use admin default, 'clip' or 'wrap' = user override
+    userPageSize = null; // null = use admin default from recordCountPerPage
     @track columnWidths = {}; // { fieldName: widthPx }
+    tableWidth = null; // px, set while custom widths are active so columns keep their sizes
     _isResizing = false;
     _resizeField = null;
     _resizeStartX = 0;
     _resizeStartWidth = 0;
-    _boundHandleResizeMove = null;
-    _boundHandleResizeEnd = null;
+    _resizeStartTableWidth = 0;
 
     // Private properties
     _searchTimeout;
-    _userSearchTimeout;
-    _boundHandleDocumentClick;
     _cachedColumnConfigs;
     _pillColorCache = new Map();
     _cachedDisplayFields = null;
     _cachedRecordsRef = null;
+    _cachedDisplayRecords = null;
+    _cachedSelectionRef = null;
+    _columnsMemo = null;
+    _loadToken = 0;
     _previousActiveElement = null;
+    _changeOwnerIds = [];
+    _changeOwnerClearsSelection = false;
+    _resizeFrame = null;
     
     // ═══════════════════════════════════════════════════════════════════════════
     // Lifecycle Hooks
@@ -145,18 +158,10 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
             this.sortField = this.defaultSortableColumn;
         }
         this.loadData();
-
-        this._boundHandleDocumentClick = this._handleDocumentClick.bind(this);
-        document.addEventListener('click', this._boundHandleDocumentClick);
-
-        this._boundHandleResizeMove = this._handleResizeMove.bind(this);
-        this._boundHandleResizeEnd = this._handleResizeEnd.bind(this);
     }
 
     disconnectedCallback() {
-        document.removeEventListener('click', this._boundHandleDocumentClick);
-        document.removeEventListener('mousemove', this._boundHandleResizeMove);
-        document.removeEventListener('mouseup', this._boundHandleResizeEnd);
+        cancelAnimationFrame(this._resizeFrame);
         this._clearTimeouts();
     }
     
@@ -168,9 +173,36 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         return `--hover-color: ${this.hoverRowColorHex || DEFAULT_HOVER_COLOR};`;
     }
     
+    get hasHeaderIcon() {
+        return Boolean(this.headerIconName?.trim());
+    }
+
+    get isUtilityHeaderIcon() {
+        return this.headerIconName?.trim().toLowerCase().startsWith('utility:');
+    }
+
+    get headerIconStyle() {
+        const color = this.headerIconBackgroundColor?.trim();
+        if (!color) return '';
+        // Utility icons get a styled wrapper; standard/custom icons expose an SLDS styling hook
+        return this.isUtilityHeaderIcon
+            ? `background-color: ${color};`
+            : `--slds-c-icon-color-background: ${color}; --sds-c-icon-color-background: ${color};`;
+    }
+
+    get totalRecordsLabel() {
+        return this.totalCountCapped ? `${this.totalRecords.toLocaleString()}+` : String(this.totalRecords);
+    }
+
     get recordCountLabel() {
-        if (this.totalRecords === 0) return 'No records';
-        return this.totalRecords === 1 ? '1 record' : `${this.totalRecords} records`;
+        if (this.totalRecords === 0) return 'No items';
+        return this.totalRecords === 1 ? '1 item' : `${this.totalRecordsLabel} items`;
+    }
+
+    get sortedByLabel() {
+        if (!this.sortField) return '';
+        const col = this.columns.find(c => c.fieldName === this.sortField);
+        return col ? col.label : '';
     }
     
     get hasSubtitle() {
@@ -178,7 +210,13 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     }
     
     get hasRecords() {
-        return !this.isLoading && !this.errorMessage && this.records?.length > 0;
+        return !this.errorMessage && this.records?.length > 0;
+    }
+
+    // Skeleton only when there is no table to keep on screen; reloads
+    // (sort/page/filter) keep the current rows under a spinner instead
+    get showSkeleton() {
+        return this.isLoading && !this.hasRecords;
     }
     
     get showEmptyState() {
@@ -229,8 +267,19 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         return Object.keys(this.columnWidths).length > 0;
     }
 
+    get noCustomColumnWidths() {
+        return !this.hasCustomColumnWidths;
+    }
+
+    // An explicit table width stops fixed layout from redistributing spare
+    // space across the columns the user did not touch
+    get tableStyle() {
+        return this.tableWidth ? `width: ${this.tableWidth}px;` : '';
+    }
+
     get tableClass() {
-        return this.hasCustomColumnWidths ? 'data-table data-table-fixed' : 'data-table';
+        const base = 'slds-table slds-table_bordered slds-no-row-hover data-table';
+        return this.hasCustomColumnWidths ? `${base} slds-table_fixed-layout data-table-fixed` : base;
     }
 
     get showExportPageOption() {
@@ -241,10 +290,6 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         return !this.disableExportAll;
     }
 
-    get showAnyExportOption() {
-        return !this.disableExportPage || !this.disableExportAll;
-    }
-    
     // ═══════════════════════════════════════════════════════════════════════════
     // Computed Properties - Selection
     // ═══════════════════════════════════════════════════════════════════════════
@@ -255,10 +300,6 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     
     get noSelectedRecords() {
         return this.selectedRecordIds.size === 0;
-    }
-    
-    get selectedCount() {
-        return this.selectedRecordIds.size;
     }
     
     get selectedCountLabel() {
@@ -286,21 +327,15 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
                 
                 const metadata = this.fieldMetadata[config.field] || {};
                 const selectedValues = this.activeFilters[config.field] || [];
-                
+
                 return {
                     fieldName: config.field,
                     label: config.label || metadata.label || config.field,
-                    options: values.map(val => ({
-                        label: val,
-                        value: val,
-                        isChecked: selectedValues.includes(val),
-                        fieldName: config.field,
-                        optionKey: `${config.field}-${val}`
-                    })),
-                    selectedValues,
-                    buttonLabel: this._getFilterButtonLabel(selectedValues),
-                    hasSelections: selectedValues.length > 0,
-                    isOpen: this.openFilterDropdown === config.field
+                    value: selectedValues[0] || '',
+                    options: [
+                        { label: 'All', value: '' },
+                        ...values.map(val => ({ label: val, value: val }))
+                    ]
                 };
             })
             .filter(Boolean);
@@ -319,7 +354,16 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     // ═══════════════════════════════════════════════════════════════════════════
     
     get columns() {
-        return this._getColumnConfigs()
+        // Rebuilt only when an input changes - the getter is read several
+        // times per render and on every resize frame
+        const memo = this._columnsMemo;
+        const { fieldMetadata, sortField, sortDirection, columnWidths } = this;
+        if (memo && memo.fieldMetadata === fieldMetadata && memo.sortField === sortField &&
+            memo.sortDirection === sortDirection && memo.columnWidths === columnWidths) {
+            return memo.value;
+        }
+
+        const value = this._getColumnConfigs()
             .filter(config => config.field)
             .map(config => {
                 const metadata = this.fieldMetadata[config.field] || {};
@@ -341,6 +385,9 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
                     hasCustomWidth: !!customWidth
                 };
             });
+
+        this._columnsMemo = { fieldMetadata, sortField, sortDirection, columnWidths, value };
+        return value;
     }
     
     get displayRecords() {
@@ -349,13 +396,16 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         // Rebuild display fields only when the records array reference changes
         if (this._cachedRecordsRef !== this.records) {
             this._cachedRecordsRef = this.records;
+            this._cachedDisplayRecords = null;
+            // Resolve columns once - the getter rebuilds its config on every access
+            const columns = this.columns;
             this._cachedDisplayFields = this.records.map(record => {
                 const fileExtension = this.isFileObject ? this._getFileExtension(record) : '';
                 const fileIcon = this.isFileObject ? this._getFileIcon(fileExtension) : '';
 
                 return {
                     Id: record.Id,
-                    displayFields: this._buildDisplayFields(record),
+                    displayFields: this._buildDisplayFields(record, columns),
                     fileExtension,
                     fileIcon,
                     contentDocumentId: this.isFileObject ? this._getContentDocumentId(record) : null,
@@ -365,57 +415,94 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
             });
         }
 
-        // Selection state is applied on every render (lightweight)
-        return this._cachedDisplayFields.map(cached => ({
-            ...cached,
-            isSelected: this.selectedRecordIds.has(cached.Id),
-            rowClass: this.selectedRecordIds.has(cached.Id) ? 'table-row selected-row' : 'table-row'
-        }));
+        // Selection state is re-applied only when the rows or the selection
+        // Set (replaced on every change) differ, so unrelated re-renders such
+        // as column resizing reuse the same row objects
+        if (!this._cachedDisplayRecords || this._cachedSelectionRef !== this.selectedRecordIds) {
+            this._cachedSelectionRef = this.selectedRecordIds;
+            this._cachedDisplayRecords = this._cachedDisplayFields.map(cached => {
+                const isSelected = this.selectedRecordIds.has(cached.Id);
+                return {
+                    ...cached,
+                    isSelected,
+                    rowClass: isSelected ? 'table-row selected-row' : 'table-row'
+                };
+            });
+        }
+        return this._cachedDisplayRecords;
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // Computed Properties - Pagination
     // ═══════════════════════════════════════════════════════════════════════════
     
+    get currentPageSize() {
+        return this.userPageSize || Number(this.recordCountPerPage) || DEFAULT_PAGE_SIZE;
+    }
+
+    get pageSizeValue() {
+        return String(this.currentPageSize);
+    }
+
+    get pageSizeOptions() {
+        const sizes = new Set([10, 25, 50, 100, this.currentPageSize]);
+        return [...sizes]
+            .sort((a, b) => a - b)
+            .map(size => ({ label: String(size), value: String(size) }));
+    }
+
+    // SOQL rejects OFFSET > 2000, so paging stops at the last page that offset can reach
+    get maxReachablePage() {
+        return Math.floor(MAX_SOQL_OFFSET / this.currentPageSize) + 1;
+    }
+
+    get isPageDepthLimited() {
+        return Math.ceil(this.totalRecords / this.currentPageSize) > this.maxReachablePage;
+    }
+
     get totalPages() {
-        return Math.ceil(this.totalRecords / this.recordCountPerPage) || 1;
+        return Math.min(Math.ceil(this.totalRecords / this.currentPageSize), this.maxReachablePage) || 1;
     }
-    
+
+    // Shown on the final reachable page so the list doesn't just appear to end
+    get pageLimitHint() {
+        if (!this.isPageDepthLimited || !this.isLastPage) return '';
+        const reachable = (this.maxReachablePage * this.currentPageSize).toLocaleString();
+        return `Only the first ${reachable} rows can be paged. Search, filter or export to reach the rest.`;
+    }
+
+    // Footer shows when paging is needed OR there are enough rows for the
+    // page-size choice to matter
     get showPagination() {
-        return this.totalRecords > this.recordCountPerPage;
+        return this.totalRecords > Math.min(10, this.currentPageSize);
     }
-    
+
     get isFirstPage() {
         return this.currentPage <= 1;
     }
-    
+
     get isLastPage() {
         return this.currentPage >= this.totalPages;
     }
-    
+
     get paginationStartRecord() {
-        return ((this.currentPage - 1) * this.recordCountPerPage) + 1;
+        return ((this.currentPage - 1) * this.currentPageSize) + 1;
     }
-    
+
     get paginationEndRecord() {
-        const end = this.currentPage * this.recordCountPerPage;
+        const end = this.currentPage * this.currentPageSize;
         return Math.min(end, this.totalRecords);
     }
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Computed Properties - Change Owner Modal
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    get hasUserSearchResults() {
-        return this.userSearchResults?.length > 0;
-    }
-    
-    get isConfirmOwnerChangeDisabled() {
-        return !this.selectedNewOwner || this.isChangingOwner;
-    }
-    
-    get changeOwnerButtonLabel() {
-        return this.isChangingOwner ? 'Changing...' : 'Change Owner';
+
+    // Skeleton placeholder rows shown while loading (capped at the 10 visible rows)
+    get skeletonRows() {
+        const columnCount = this._getColumnConfigs().filter(config => config.field).length || 3;
+        const rowCount = Math.min(this.currentPageSize, 10);
+
+        return Array.from({ length: rowCount }, (_, i) => ({
+            key: `sk-${i}`,
+            cells: Array.from({ length: columnCount }, (_, j) => `sk-${i}-${j}`)
+        }));
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -428,35 +515,46 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
             return;
         }
         
+        // Only the latest request may apply its response - rapid sorting,
+        // paging or typing can otherwise resolve out of order
+        const token = ++this._loadToken;
         this.isLoading = true;
         this.errorMessage = '';
         
         try {
-            const result = await executeQuery({
-                soqlQuery: this.soqlQuery,
-                recordId: this.recordId || '',
-                searchTerm: this.searchTerm || '',
-                sortField: this.sortField || '',
-                sortDirection: this.sortDirection,
-                pageSize: this.recordCountPerPage,
-                pageNumber: this.currentPage,
-                filtersJson: JSON.stringify(this.activeFilters),
-                bypassSharing: this.bypassSharing
-            });
+            const result = await executeQuery(this._buildQueryParams(this.currentPageSize, this.currentPage));
+            if (token !== this._loadToken) return;
             
             if (result.success) {
                 this.records = result.records || [];
                 this.totalRecords = result.totalCount || 0;
+                this.totalCountCapped = result.totalCountCapped === true;
                 this.fieldMetadata = result.fieldMetadata || {};
+                this.lastRefreshed = Date.now();
                 this._updateAllSelectedState();
             } else {
                 this._handleQueryError(result.errorMessage);
             }
         } catch (error) {
+            if (token !== this._loadToken) return;
             this._handleQueryError(this._extractErrorMessage(error));
         } finally {
-            this.isLoading = false;
+            if (token === this._loadToken) this.isLoading = false;
         }
+    }
+
+    _buildQueryParams(pageSize, pageNumber) {
+        return {
+            soqlQuery: this.soqlQuery,
+            recordId: this.recordId || '',
+            searchTerm: this.searchTerm || '',
+            sortField: this.sortField || '',
+            sortDirection: this.sortDirection,
+            pageSize,
+            pageNumber,
+            filtersJson: JSON.stringify(this.activeFilters),
+            bypassSharing: this.bypassSharing
+        };
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -493,63 +591,72 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     // Quick Filter Handlers
     // ═══════════════════════════════════════════════════════════════════════════
     
-    toggleFilterDropdown(event) {
-        event.stopPropagation();
-        const { field } = event.currentTarget.dataset;
-        this.openFilterDropdown = this.openFilterDropdown === field ? null : field;
+    handleFilterChange(event) {
+        const field = event.target.dataset.field;
+        const value = event.detail.value;
+
+        if (!field) return;
+
+        this._updateFilter(field, value ? [value] : []);
     }
-    
-    handleFilterOptionChange(event) {
-        event.stopPropagation();
-        const { field, value } = event.target.dataset;
-        const isChecked = event.target.checked;
-        
-        if (!field || !value) return;
-        
-        let selections = [...(this.activeFilters[field] || [])];
-        
-        if (isChecked && !selections.includes(value)) {
-            selections.push(value);
-        } else if (!isChecked) {
-            selections = selections.filter(v => v !== value);
-        }
-        
-        this._updateFilter(field, selections);
-    }
-    
-    clearFilterSelection(event) {
-        event.stopPropagation();
-        const { field } = event.currentTarget.dataset;
-        this._updateFilter(field, []);
-    }
-    
+
     clearAllFilters() {
         this.activeFilters = {};
-        this.openFilterDropdown = null;
         this.currentPage = 1;
         this.loadData();
     }
-    
-    closeFilterDropdowns() {
-        if (this.openFilterDropdown) {
-            this.openFilterDropdown = null;
-        }
-    }
-    
+
     stopPropagation(event) {
         event.stopPropagation();
     }
-    
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Change Owner Modal Handlers
     // ═══════════════════════════════════════════════════════════════════════════
-    
+
+    get userFilter() {
+        return {
+            criteria: [{ fieldPath: 'IsActive', operator: 'eq', value: true }]
+        };
+    }
+
+    get userDisplayInfo() {
+        return { additionalFields: ['Email'] };
+    }
+
+    get userMatchingInfo() {
+        return {
+            primaryField: { fieldPath: 'Name' },
+            additionalFields: [{ fieldPath: 'Email' }]
+        };
+    }
+
+    get isConfirmOwnerChangeDisabled() {
+        return !this.newOwnerId || this.isChangingOwner;
+    }
+
+    get changeOwnerButtonLabel() {
+        return this.isChangingOwner ? 'Changing...' : 'Change Owner';
+    }
+
+    get changeOwnerCount() {
+        return this._changeOwnerIds.length;
+    }
+
     openChangeOwnerModal() {
+        this._openChangeOwner(Array.from(this.selectedRecordIds), true);
+    }
+
+    // Row-level changes pass just that row, leaving the checkbox selection alone
+    _openChangeOwner(recordIds, clearSelectionOnSuccess) {
+        if (recordIds.length === 0) return;
+
+        this._changeOwnerIds = recordIds;
+        this._changeOwnerClearsSelection = clearSelectionOnSuccess;
+        this.changeOwnerError = '';
         this._previousActiveElement = this.template.activeElement || document.activeElement;
+        this.newOwnerId = null;
         this.showChangeOwnerModal = true;
-        this.userSearchTerm = '';
-        this.userSearchResults = [];
-        this.selectedNewOwner = null;
 
         // Focus the modal's close button after render
         // eslint-disable-next-line @lwc/lwc/no-async-operation
@@ -560,19 +667,17 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     }
 
     closeChangeOwnerModal() {
+        if (this.isChangingOwner) return;
         this.showChangeOwnerModal = false;
-        this.userSearchTerm = '';
-        this.userSearchResults = [];
-        this.selectedNewOwner = null;
-        this.isChangingOwner = false;
+        this.changeOwnerError = '';
+        this.newOwnerId = null;
 
-        // Restore focus to the element that opened the modal
         if (this._previousActiveElement) {
             try { this._previousActiveElement.focus(); } catch (_) { /* element may be gone */ }
             this._previousActiveElement = null;
         }
     }
-    
+
     handleModalKeydown(event) {
         if (event.key === 'Escape') {
             this.closeChangeOwnerModal();
@@ -584,7 +689,7 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
             if (!modal) return;
 
             const focusable = modal.querySelectorAll(
-                'button, [href], lightning-input, lightning-button, lightning-button-icon, [tabindex]:not([tabindex="-1"])'
+                'button, [href], lightning-record-picker, lightning-button, lightning-button-icon, [tabindex]:not([tabindex="-1"])'
             );
             if (focusable.length === 0) return;
 
@@ -602,60 +707,44 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         }
     }
 
-    handleUserSearch(event) {
-        const searchValue = event.target.value || '';
-        this.userSearchTerm = searchValue;
-
-        clearTimeout(this._userSearchTimeout);
-
-        if (searchValue.length < MIN_USER_SEARCH_LENGTH) {
-            this.userSearchResults = [];
-            return;
-        }
-
-        this._userSearchTimeout = setTimeout(() => this._searchForUsers(searchValue), DEBOUNCE_DELAY);
+    handleOwnerChange(event) {
+        this.newOwnerId = event.detail.recordId || null;
     }
-    
-    handleUserSelect(event) {
-        const userId = event.currentTarget.dataset.id;
-        const selectedUser = this.userSearchResults.find(u => u.Id === userId);
-        
-        if (selectedUser) {
-            this.selectedNewOwner = selectedUser;
-            this.userSearchResults = this.userSearchResults.map(user => ({
-                ...user,
-                isSelected: user.Id === userId,
-                userItemClass: user.Id === userId ? 'user-item user-item-selected' : 'user-item'
-            }));
-        }
-    }
-    
+
     async handleConfirmOwnerChange() {
-        if (!this.selectedNewOwner || this.selectedRecordIds.size === 0) return;
-        
+        if (!this.newOwnerId || this._changeOwnerIds.length === 0) return;
+
         this.isChangingOwner = true;
-        
+        this.changeOwnerError = '';
+
+        let result;
         try {
-            const result = await changeRecordsOwner({
-                recordIds: Array.from(this.selectedRecordIds),
-                newOwnerId: this.selectedNewOwner.Id
+            result = await changeRecordsOwner({
+                recordIds: this._changeOwnerIds,
+                newOwnerId: this.newOwnerId
             });
-            
-            if (result.success) {
-                this._showToast('Success', `Successfully changed owner for ${result.successCount} record(s)`, 'success');
-                this.clearSelection();
-                this.closeChangeOwnerModal();
-                this.loadData();
-            } else {
-                this._showToast('Error', result.errorMessage || 'Failed to change owner', 'error');
-            }
         } catch (error) {
-            this._showToast('Error', this._extractErrorMessage(error), 'error');
+            result = { success: false, errorMessage: this._extractErrorMessage(error) };
         } finally {
             this.isChangingOwner = false;
         }
+
+        if (!result.success && !(result.successCount > 0)) {
+            // Nothing changed - keep the modal open so another owner can be picked
+            this.changeOwnerError = result.errorMessage || 'Failed to change owner';
+            return;
+        }
+
+        if (result.success) {
+            this._showToast('Success', `Successfully changed owner for ${result.successCount} record(s)`, 'success');
+        } else {
+            this._showToast('Warning', result.errorMessage, 'warning');
+        }
+        if (this._changeOwnerClearsSelection) this.clearSelection();
+        this.closeChangeOwnerModal();
+        this.loadData();
     }
-    
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Event Handlers
     // ═══════════════════════════════════════════════════════════════════════════
@@ -687,13 +776,27 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         this.loadData();
     }
     
-    handleRowClick(event) {
-        if (event.target.type === 'checkbox') return;
-        
-        const { id } = event.currentTarget.dataset;
-        if (id) this._navigateToRecord(id);
+    async handleCopyCell(event) {
+        event.stopPropagation();
+        const value = event.currentTarget.dataset.value || '';
+
+        try {
+            await navigator.clipboard.writeText(value);
+        } catch (e) {
+            // Clipboard API unavailable (permissions/older browser) - legacy fallback
+            const textarea = document.createElement('textarea');
+            textarea.value = value;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        }
+
+        this._showToast('Copied', 'Cell value copied to clipboard', 'success');
     }
-    
+
     handleLinkClick(event) {
         event.preventDefault();
         event.stopPropagation();
@@ -706,7 +809,6 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         const action = event.detail.value;
 
         switch (action) {
-            case 'refresh': this.loadData(); break;
             case 'exportPage': this._exportToCSV(this.records); break;
             case 'exportAll': this._exportAllToCSV(); break;
             case 'changeOwner': this.openChangeOwnerModal(); break;
@@ -721,44 +823,61 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
 
     handleResetColumnWidths() {
         this.columnWidths = {};
+        this.tableWidth = null;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Column Resize Handlers
     // ═══════════════════════════════════════════════════════════════════════════
 
-    handleResizeMouseDown(event) {
+    // Pointer events cover mouse, touch and pen; capturing the pointer on the
+    // handle keeps move/up events coming even when the cursor leaves the header
+    handleResizeStart(event) {
+        if (event.button > 0) return;
         event.preventDefault();
         event.stopPropagation();
 
-        const field = event.currentTarget.dataset.field;
-        const th = event.currentTarget.closest('th');
-        if (!th) return;
+        const handle = event.currentTarget;
+        const th = handle.closest('th');
+        const table = handle.closest('table');
+        if (!th || !table) return;
+
+        // Freeze every column at its current rendered width first, so switching
+        // to fixed layout moves nothing except the column being dragged
+        const widths = {};
+        this.template.querySelectorAll('th.resizable-header').forEach(header => {
+            widths[header.dataset.col] = header.offsetWidth;
+        });
+        this.columnWidths = widths;
+        this.tableWidth = table.offsetWidth;
 
         this._isResizing = true;
-        this._resizeField = field;
+        this._resizeField = handle.dataset.field;
         this._resizeStartX = event.clientX;
         this._resizeStartWidth = th.offsetWidth;
-
-        document.addEventListener('mousemove', this._boundHandleResizeMove);
-        document.addEventListener('mouseup', this._boundHandleResizeEnd);
+        this._resizeStartTableWidth = table.offsetWidth;
+        handle.setPointerCapture(event.pointerId);
     }
 
-    _handleResizeMove(event) {
+    handleResizeMove(event) {
         if (!this._isResizing) return;
 
-        const diff = event.clientX - this._resizeStartX;
-        const newWidth = Math.max(60, this._resizeStartWidth + diff);
+        const newWidth = Math.max(MIN_COLUMN_WIDTH, this._resizeStartWidth + event.clientX - this._resizeStartX);
+        const tableWidth = this._resizeStartTableWidth + newWidth - this._resizeStartWidth;
+        const field = this._resizeField;
 
-        this.columnWidths = { ...this.columnWidths, [this._resizeField]: newWidth };
+        // At most one re-render per frame, however fast pointermove fires
+        cancelAnimationFrame(this._resizeFrame);
+        // eslint-disable-next-line @lwc/lwc/no-async-operation
+        this._resizeFrame = requestAnimationFrame(() => {
+            this.columnWidths = { ...this.columnWidths, [field]: newWidth };
+            this.tableWidth = tableWidth;
+        });
     }
 
-    _handleResizeEnd() {
+    handleResizeEnd() {
         this._isResizing = false;
         this._resizeField = null;
-
-        document.removeEventListener('mousemove', this._boundHandleResizeMove);
-        document.removeEventListener('mouseup', this._boundHandleResizeEnd);
     }
     
     handleRowActionSelect(event) {
@@ -774,6 +893,15 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         }
     }
     
+    handlePageSizeChange(event) {
+        const size = parseInt(event.detail.value, 10);
+        if (!size || size === this.currentPageSize) return;
+
+        this.userPageSize = size;
+        this.currentPage = 1;
+        this.loadData();
+    }
+
     // Pagination handlers
     handleFirstPage() { this.currentPage = 1; this.loadData(); }
     handlePreviousPage() { if (this.currentPage > 1) { this.currentPage--; this.loadData(); } }
@@ -802,8 +930,8 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         return this._cachedColumnConfigs;
     }
     
-    _buildDisplayFields(record) {
-        return this.columns.map((column, index) => {
+    _buildDisplayFields(record, columns) {
+        return columns.map((column, index) => {
             const fieldValue = this._getFieldValue(record, column.fieldName);
             const fieldType = column.type;
             const isPill = column.displayAsPill && fieldValue;
@@ -814,7 +942,7 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
                 fieldName: column.fieldName,
                 rawValue: fieldValue,
                 displayValue: this._formatValue(fieldValue, fieldType),
-                isLink: this._isLinkField(column, record) && !isPill,
+                isLink: this._isLinkField(column) && !isPill,
                 linkUrl: this._getLinkUrl(column, record),
                 linkRecordId: this._getLinkRecordId(column, record),
                 isBoolean: fieldType === 'BOOLEAN' && !isPill,
@@ -854,7 +982,7 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         return String(value);
     }
     
-    _isLinkField(column, record) {
+    _isLinkField(column) {
         const metadata = this.fieldMetadata[column.fieldName] || {};
         return metadata.isNameField || column.fieldName === 'Name' || column.fieldName.endsWith('.Name');
     }
@@ -902,25 +1030,36 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     
     _getPillColor(value, colorMap) {
         if (!value || !colorMap?.size) return DEFAULT_PILL_COLOR;
-        
+
         const color = colorMap.get(String(value).toLowerCase());
         if (!color) return DEFAULT_PILL_COLOR;
-        
-        return { background: color, text: this._getContrastingTextColor(color) };
+
+        return this._toSubtlePillColors(color);
     }
-    
-    _getContrastingTextColor(hexColor) {
-        const hex = hexColor.replace('#', '');
-        const r = parseInt(hex.substr(0, 2), 16);
-        const g = parseInt(hex.substr(2, 2), 16);
-        const b = parseInt(hex.substr(4, 2), 16);
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        return luminance > 0.5 ? '#181818' : '#ffffff';
+
+    // The configured colour becomes a soft tint (background) and a darker shade
+    // (text) so pills stay legible and understated regardless of the hue chosen
+    _toSubtlePillColors(hexColor) {
+        const rgb = this._hexToRgb(hexColor);
+        if (!rgb) return DEFAULT_PILL_COLOR;
+
+        const mix = (channel, target, amount) => Math.round(channel + (target - channel) * amount);
+        const background = `rgb(${mix(rgb.r, 255, 0.78)}, ${mix(rgb.g, 255, 0.78)}, ${mix(rgb.b, 255, 0.78)})`;
+        const text = `rgb(${mix(rgb.r, 0, 0.52)}, ${mix(rgb.g, 0, 0.52)}, ${mix(rgb.b, 0, 0.52)})`;
+
+        return { background, text };
     }
-    
-    _getFilterButtonLabel(selectedValues) {
-        if (!selectedValues?.length) return 'All';
-        return selectedValues.length === 1 ? selectedValues[0] : `${selectedValues.length} selected`;
+
+    _hexToRgb(hexColor) {
+        let hex = String(hexColor).replace('#', '').trim();
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+
+        return {
+            r: parseInt(hex.slice(0, 2), 16),
+            g: parseInt(hex.slice(2, 4), 16),
+            b: parseInt(hex.slice(4, 6), 16)
+        };
     }
     
     _updateFilter(field, selections) {
@@ -944,6 +1083,7 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         this.errorMessage = message || 'An error occurred while loading data.';
         this.records = [];
         this.totalRecords = 0;
+        this.totalCountCapped = false;
     }
     
     _extractErrorMessage(error) {
@@ -953,16 +1093,6 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
     
     _clearTimeouts() {
         clearTimeout(this._searchTimeout);
-        clearTimeout(this._userSearchTimeout);
-    }
-    
-    _handleDocumentClick(event) {
-        if (this.openFilterDropdown) {
-            const filterBar = this.template.querySelector('.filter-bar');
-            if (filterBar && !filterBar.contains(event.target)) {
-                this.openFilterDropdown = null;
-            }
-        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1077,33 +1207,11 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         window.open(downloadUrl, '_blank');
     }
     
+    // Acts on the one row without disturbing the user's checkbox selection
     _openChangeOwnerForSingleRecord(recordId) {
-        this.selectedRecordIds = new Set([recordId]);
-        this.openChangeOwnerModal();
+        this._openChangeOwner([recordId], false);
     }
-    
-    async _searchForUsers(searchTerm) {
-        this.isSearchingUsers = true;
-        
-        try {
-            const results = await searchUsers({ searchTerm });
-            this.userSearchResults = results.map(user => ({
-                Id: user.Id,
-                Name: user.Name,
-                Email: user.Email,
-                SmallPhotoUrl: user.SmallPhotoUrl,
-                Title: user.Title || '',
-                isSelected: this.selectedNewOwner?.Id === user.Id,
-                userItemClass: this.selectedNewOwner?.Id === user.Id ? 'user-item user-item-selected' : 'user-item'
-            }));
-        } catch (error) {
-            console.error('Error searching users:', error);
-            this.userSearchResults = [];
-        } finally {
-            this.isSearchingUsers = false;
-        }
-    }
-    
+
     async _exportAllToCSV() {
         if (this.totalRecords === 0) {
             this._showToast('Warning', 'No records to export', 'warning');
@@ -1112,28 +1220,57 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
 
         this.isLoading = true;
         try {
-            const result = await executeQuery({
-                soqlQuery: this.soqlQuery,
-                recordId: this.recordId || '',
-                searchTerm: this.searchTerm || '',
-                sortField: this.sortField || '',
-                sortDirection: this.sortDirection,
-                pageSize: this.totalRecords,
-                pageNumber: 1,
-                filtersJson: JSON.stringify(this.activeFilters),
-                bypassSharing: this.bypassSharing
-            });
+            // Lists that OFFSET can fully reach export in the current sort order;
+            // anything larger switches to keyset batches, which come back in Id order
+            const needsKeyset = this.totalCountCapped || this.totalRecords > MAX_SOQL_OFFSET + EXPORT_BATCH_SIZE;
+            const allRecords = needsKeyset ? await this._fetchAllByKeyset() : await this._fetchAllByOffset();
 
-            if (result.success && result.records?.length) {
-                this._exportToCSV(result.records);
-            } else {
-                this._showToast('Warning', 'No records to export', 'warning');
+            this._exportToCSV(allRecords);
+            if (allRecords.length >= MAX_EXPORT_ROWS) {
+                this._showToast('Warning', `Export is limited to the first ${MAX_EXPORT_ROWS.toLocaleString()} records`, 'warning');
             }
         } catch (error) {
             this._showToast('Error', 'Failed to fetch all records for export', 'error');
         } finally {
             this.isLoading = false;
         }
+    }
+
+    async _fetchAllByOffset() {
+        const allRecords = [];
+        const lastPage = Math.ceil(this.totalRecords / EXPORT_BATCH_SIZE);
+        for (let page = 1; page <= lastPage; page++) {
+            // eslint-disable-next-line no-await-in-loop
+            const result = await executeQuery(this._buildQueryParams(EXPORT_BATCH_SIZE, page));
+            if (!result.success) throw new Error(result.errorMessage);
+            allRecords.push(...(result.records || []));
+            if (!result.records || result.records.length < EXPORT_BATCH_SIZE) break;
+        }
+        return allRecords;
+    }
+
+    async _fetchAllByKeyset() {
+        const allRecords = [];
+        let afterId = '';
+        while (allRecords.length < MAX_EXPORT_ROWS) {
+            // eslint-disable-next-line no-await-in-loop
+            const result = await executeExportBatch({
+                soqlQuery: this.soqlQuery,
+                recordId: this.recordId || '',
+                searchTerm: this.searchTerm || '',
+                filtersJson: JSON.stringify(this.activeFilters),
+                bypassSharing: this.bypassSharing,
+                afterId,
+                batchSize: EXPORT_BATCH_SIZE
+            });
+            if (!result.success) throw new Error(result.errorMessage);
+
+            const batch = result.records || [];
+            allRecords.push(...batch);
+            if (batch.length < EXPORT_BATCH_SIZE) break;
+            afterId = batch[batch.length - 1].Id;
+        }
+        return allRecords;
     }
 
     _exportToCSV(recordsToExport) {
@@ -1143,9 +1280,10 @@ export default class CustomListView extends NavigationMixin(LightningElement) {
         }
 
         try {
-            const headers = this.columns.map(col => `"${col.label}"`).join(',');
+            const columns = this.columns;
+            const headers = columns.map(col => `"${col.label}"`).join(',');
             const rows = recordsToExport.map(record =>
-                this.columns.map(col => {
+                columns.map(col => {
                     const value = this._getFieldValue(record, col.fieldName);
                     const formatted = this._formatValue(value, col.type);
                     return `"${String(formatted).replace(/"/g, '""')}"`;

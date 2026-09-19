@@ -87,6 +87,176 @@ private class CustomListViewControllerTest {
         System.assertEquals(true, result.success, 'Query should succeed with null bypassSharing');
     }
     
+    /**
+     * @description With-sharing baseline: what the running user can see natively
+     */
+    private with sharing class SharingBaseline {
+        public Integer visibleCount(String objectName) {
+            return Database.countQuery('SELECT COUNT() FROM ' + objectName);
+        }
+    }
+
+    /**
+     * @description Proves bypassSharing actually switches sharing enforcement, as a
+     *              restricted user: off = exactly what sharing grants, on = every record.
+     *              Tasks are checked alongside Accounts because activities stay private
+     *              in orgs whose Account org-wide default is public.
+     */
+    @isTest
+    static void testExecuteQuery_BypassSharing_AsRestrictedUser() {
+        List<Profile> profiles = [SELECT Id FROM Profile WHERE Name = 'Standard User' LIMIT 1];
+        if (profiles.isEmpty()) {
+            return; // Profile name is localised in some orgs - nothing to run as
+        }
+
+        insert new Task(Subject = 'Owned by the admin', Status = 'Not Started', Priority = 'Normal');
+
+        User restrictedUser = new User(
+            ProfileId = profiles[0].Id,
+            LastName = 'Restricted',
+            Alias = 'restr',
+            Email = 'restricted@customlistview.test',
+            Username = 'restricted' + System.currentTimeMillis() + '@customlistview.test',
+            TimeZoneSidKey = 'GMT',
+            LocaleSidKey = 'en_US',
+            EmailEncodingKey = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+
+        Map<String, Integer> totals = new Map<String, Integer>{ 'Account' => 25, 'Task' => 1 };
+        Boolean sharingRestrictedSomething = false;
+
+        Test.startTest();
+        System.runAs(restrictedUser) {
+            for (String objectName : totals.keySet()) {
+                Integer visible = new SharingBaseline().visibleCount(objectName);
+                sharingRestrictedSomething = sharingRestrictedSomething || visible < totals.get(objectName);
+                String query = 'SELECT Id FROM ' + objectName;
+
+                CustomListViewController.QueryResult enforced = CustomListViewController.executeQuery(
+                    query, null, '', '', 'ASC', 50, 1, '', false
+                );
+                System.assertEquals(true, enforced.success, 'Enforced query failed: ' + enforced.errorMessage);
+                System.assertEquals(visible, enforced.totalCount, objectName + ': sharing must be enforced when bypassSharing is off');
+                System.assertEquals(visible, enforced.records.size(), objectName + ': records must respect sharing when bypassSharing is off');
+
+                CustomListViewController.QueryResult bypassed = CustomListViewController.executeQuery(
+                    query, null, '', '', 'ASC', 50, 1, '', true
+                );
+                System.assertEquals(true, bypassed.success, 'Bypassed query failed: ' + bypassed.errorMessage);
+                System.assertEquals(totals.get(objectName), bypassed.totalCount, objectName + ': count must ignore sharing when bypassSharing is on');
+                System.assertEquals(totals.get(objectName), bypassed.records.size(), objectName + ': records must ignore sharing when bypassSharing is on');
+            }
+        }
+        Test.stopTest();
+
+        // Not asserted: an org with fully public sharing legitimately hides nothing
+        if (!sharingRestrictedSomething) {
+            System.debug(LoggingLevel.WARN, 'Sharing hid no records from the restricted user - bypass difference not exercised in this org');
+        }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Scale Limit Tests (count cap, OFFSET ceiling, keyset export)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @isTest
+    static void testExecuteQuery_CountCappedAboveCap() {
+        CustomListViewController.countCap = 10;
+
+        Test.startTest();
+        CustomListViewController.QueryResult result = CustomListViewController.executeQuery(
+            'SELECT Id, Name FROM Account', null, '', 'Name', 'ASC', 5, 1, '', false
+        );
+        Test.stopTest();
+
+        System.assertEquals(true, result.success, 'Query should succeed: ' + result.errorMessage);
+        System.assertEquals(10, result.totalCount, 'Count should stop at the cap');
+        System.assertEquals(true, result.totalCountCapped, 'Should flag that more rows exist than the cap');
+        System.assertEquals(5, result.records.size(), 'Capping the count must not affect the page of records');
+    }
+
+    @isTest
+    static void testExecuteQuery_CountExactlyAtCapIsNotCapped() {
+        CustomListViewController.countCap = 25;
+
+        Test.startTest();
+        CustomListViewController.QueryResult result = CustomListViewController.executeQuery(
+            'SELECT Id, Name FROM Account', null, '', 'Name', 'ASC', 5, 1, '', false
+        );
+        Test.stopTest();
+
+        System.assertEquals(25, result.totalCount, 'Should return the exact count');
+        System.assertEquals(false, result.totalCountCapped, 'Exactly the cap is still an exact count');
+    }
+
+    @isTest
+    static void testExecuteQuery_OffsetBeyondSoqlLimitReturnsFriendlyError() {
+        Test.startTest();
+        CustomListViewController.QueryResult lastReachable = CustomListViewController.executeQuery(
+            'SELECT Id, Name FROM Account', null, '', 'Name', 'ASC', 20, 101, '', false
+        );
+        CustomListViewController.QueryResult beyond = CustomListViewController.executeQuery(
+            'SELECT Id, Name FROM Account', null, '', 'Name', 'ASC', 20, 102, '', false
+        );
+        Test.stopTest();
+
+        System.assertEquals(true, lastReachable.success, 'OFFSET 2000 is still valid: ' + lastReachable.errorMessage);
+        System.assertEquals(false, beyond.success, 'OFFSET above 2000 should be rejected');
+        System.assert(beyond.errorMessage.contains('2020'), 'Should explain the reachable row limit: ' + beyond.errorMessage);
+    }
+
+    @isTest
+    static void testExecuteExportBatch_WalksAllRecordsWithoutOffset() {
+        Set<Id> seen = new Set<Id>();
+        List<Integer> batchSizes = new List<Integer>();
+        String afterId = '';
+
+        Test.startTest();
+        for (Integer i = 0; i < 5; i++) {
+            CustomListViewController.QueryResult batch = CustomListViewController.executeExportBatch(
+                'SELECT Id, Name FROM Account ORDER BY Name DESC', null, '', '', false, afterId, 10
+            );
+            System.assertEquals(true, batch.success, 'Batch should succeed: ' + batch.errorMessage);
+            batchSizes.add(batch.records.size());
+            for (SObject record : batch.records) {
+                // Ordering is proven by coverage, not by comparing Ids here: Apex string
+                // comparison is case-insensitive while SOQL orders Ids case-sensitively
+                System.assert(seen.add(record.Id), 'No record may appear in two batches');
+                afterId = record.Id;
+            }
+            if (batch.records.size() < 10) break;
+        }
+        Test.stopTest();
+
+        System.assertEquals(new List<Integer>{ 10, 10, 5 }, batchSizes, 'Should walk 25 records in three batches');
+        System.assertEquals(25, seen.size(), 'Every record should be exported exactly once');
+    }
+
+    @isTest
+    static void testExecuteExportBatch_RespectsWhereSearchAndFilters() {
+        Test.startTest();
+        CustomListViewController.QueryResult result = CustomListViewController.executeExportBatch(
+            'SELECT Id, Name, Industry FROM Account WHERE AnnualRevenue > 0', null, 'Test Account',
+            '{"Industry":["Technology"]}', true, '', 200
+        );
+        Test.stopTest();
+
+        System.assertEquals(true, result.success, 'Batch should succeed: ' + result.errorMessage);
+        System.assertEquals(5, result.records.size(), 'Should apply the base WHERE, search term and quick filter');
+    }
+
+    @isTest
+    static void testExecuteExportBatch_RejectsInvalidAfterId() {
+        Test.startTest();
+        CustomListViewController.QueryResult result = CustomListViewController.executeExportBatch(
+            'SELECT Id FROM Account', null, '', '', false, '\' OR Name != \'', 10
+        );
+        Test.stopTest();
+
+        System.assertEquals(false, result.success, 'A non-Id afterId must never reach the query');
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Placeholder Tests
     // ═══════════════════════════════════════════════════════════════════════════
@@ -404,6 +574,19 @@ private class CustomListViewControllerTest {
     }
     
     @isTest
+    static void testExecuteQuery_InvalidSortField() {
+        Test.startTest();
+        CustomListViewController.QueryResult result = CustomListViewController.executeQuery(
+            'SELECT Id, Name FROM Account',
+            null, '', 'Name LIMIT 1 --', 'ASC', 10, 1, '', false
+        );
+        Test.stopTest();
+
+        System.assertEquals(false, result.success, 'Non-identifier sort field should be rejected');
+        System.assert(result.errorMessage.contains('sort field'), 'Error should mention sort field');
+    }
+
+    @isTest
     static void testExecuteQuery_WithWhereClause() {
         Test.startTest();
         CustomListViewController.QueryResult result = CustomListViewController.executeQuery(
@@ -438,70 +621,6 @@ private class CustomListViewControllerTest {
         CustomListViewController.FieldMetadata nameMeta = result.fieldMetadata.get('Name');
         System.assertEquals(true, nameMeta.isNameField, 'Name should be identified as name field');
         System.assertEquals(true, nameMeta.sortable, 'Name should be sortable');
-    }
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // User Search Tests
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    @isTest
-    static void testSearchUsers_ValidSearch() {
-        User currentUser = [SELECT Id, Name FROM User WHERE Id = :UserInfo.getUserId()];
-        String searchTerm = currentUser.Name.length() >= 3 ? currentUser.Name.substring(0, 3) : currentUser.Name;
-        
-        Test.startTest();
-        List<User> results = CustomListViewController.searchUsers(searchTerm);
-        Test.stopTest();
-        
-        System.assertNotEquals(null, results, 'Results should not be null');
-    }
-    
-    @isTest
-    static void testSearchUsers_EmptySearchTerm() {
-        Test.startTest();
-        List<User> results = CustomListViewController.searchUsers('');
-        Test.stopTest();
-        
-        System.assertEquals(0, results.size(), 'Empty search term should return empty list');
-    }
-    
-    @isTest
-    static void testSearchUsers_ShortSearchTerm() {
-        Test.startTest();
-        List<User> results = CustomListViewController.searchUsers('a');
-        Test.stopTest();
-        
-        System.assertEquals(0, results.size(), 'Single character search should return empty list');
-    }
-    
-    @isTest
-    static void testSearchUsers_NullSearchTerm() {
-        Test.startTest();
-        List<User> results = CustomListViewController.searchUsers(null);
-        Test.stopTest();
-        
-        System.assertEquals(0, results.size(), 'Null search term should return empty list');
-    }
-    
-    @isTest
-    static void testSearchUsers_NoResults() {
-        Test.startTest();
-        List<User> results = CustomListViewController.searchUsers('ZZZZNONEXISTENT12345');
-        Test.stopTest();
-        
-        System.assertEquals(0, results.size(), 'Non-matching search should return empty list');
-    }
-    
-    @isTest
-    static void testSearchUsers_WhitespaceHandling() {
-        User currentUser = [SELECT Id, Name FROM User WHERE Id = :UserInfo.getUserId()];
-        String searchTerm = '  ' + (currentUser.Name.length() >= 3 ? currentUser.Name.substring(0, 3) : currentUser.Name) + '  ';
-        
-        Test.startTest();
-        List<User> results = CustomListViewController.searchUsers(searchTerm);
-        Test.stopTest();
-        
-        System.assertNotEquals(null, results, 'Should handle whitespace in search term');
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -593,21 +712,6 @@ private class CustomListViewControllerTest {
         
         System.assertEquals(true, result.success, 'Owner change should succeed for contacts');
         System.assertEquals(2, result.successCount, 'Both contacts should be updated');
-    }
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Record URL Tests
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    @isTest
-    static void testGetRecordUrl() {
-        Account testAccount = [SELECT Id FROM Account LIMIT 1];
-        
-        Test.startTest();
-        String url = CustomListViewController.getRecordUrl(testAccount.Id);
-        Test.stopTest();
-        
-        System.assertEquals('/' + testAccount.Id, url, 'URL should be correct');
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
