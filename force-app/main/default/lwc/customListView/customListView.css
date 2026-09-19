@@ -1,34 +1,51 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Custom List View - Modern UI Styles
+   Custom List View - Refined UI Styles (SLDS-aligned)
    ═══════════════════════════════════════════════════════════════════ */
 
 /* CSS Custom Properties */
+/* Colors resolve from SLDS global styling hooks when the org theme provides
+   them, falling back to the classic Lightning palette */
 :host {
-    --primary-color: #0176d3;
-    --primary-hover: #014486;
-    --text-primary: #181818;
-    --text-secondary: #444444;
-    --text-muted: #706e6b;
-    --border-color: #e5e5e5;
-    --border-radius: 8px;
-    --background-light: #fafaf9;
-    --background-dark: #e8e8e8;
-    --background-white: #ffffff;
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
-    --transition-fast: 150ms ease;
-    --transition-normal: 200ms ease;
-    --selection-color: #e8f4fd;
-    --selection-border: #0176d3;
+    --primary-color: var(--slds-g-color-accent-2, #0176d3);
+    --primary-hover: var(--slds-g-color-accent-3, #014486);
+    --text-primary: var(--slds-g-color-on-surface-3, #181818);
+    --text-secondary: var(--slds-g-color-on-surface-2, #514f4d);
+    --text-muted: var(--slds-g-color-on-surface-1, #747474);
+    --border-color: var(--slds-g-color-border-1, #e5e5e5);
+    /* Row dividers sit a step lighter than structural borders */
+    --row-divider-color: var(--slds-g-color-neutral-base-95, #f3f3f3);
+    --title-color: #032d60;
+    /* Track the org theme via SLDS global styling hooks, falling back to the
+       SLDS 2.0 look: large card radius, pill-shaped buttons */
+    --border-radius: var(--slds-g-radius-border-4, 0.75rem);
+    --background-light: var(--slds-g-color-surface-container-1, #fafaf9);
+    --background-dark: var(--slds-g-color-surface-container-2, #f3f3f3);
+    --background-white: var(--slds-g-color-surface-1, #ffffff);
+    --focus-ring: 0 0 0 3px rgba(1, 118, 211, 0.16);
+    --transition-fast: 120ms ease-out;
+    --selection-color: var(--slds-g-color-brand-base-95, #eef4ff);
+    --selection-color-hover: var(--slds-g-color-brand-base-90, #e0ecfd);
+    --selection-border: var(--primary-color);
 }
 
 /* Container */
 .custom-list-view-container {
     background: var(--background-white);
+    border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
-    box-shadow: var(--shadow-sm);
-    font-family: 'Salesforce Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     position: relative;
+    /* overflow stays visible so footer/header dropdowns aren't clipped;
+       first/last children are rounded to preserve the card corners */
+}
+
+.custom-list-view-container > :first-child {
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+}
+
+.custom-list-view-container > :last-child {
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -39,54 +56,80 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1rem;
     padding: 1rem 1.25rem;
     border-bottom: 1px solid var(--border-color);
-    background: linear-gradient(to bottom, #ffffff 0%, #fafaf9 100%);
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    background: var(--background-white);
 }
 
 .header-left {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+/* Header Icon - circular container matching the OOTB list view header */
+.header-icon {
+    flex-shrink: 0;
+    --slds-c-icon-radius-border: 50%;
+    --sds-c-icon-radius-border: 50%;
+}
+
+.header-icon-utility {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background-color: var(--primary-color);
 }
 
 .header-title-section {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0;
 }
 
 .header-title-row {
     display: flex;
-    align-items: baseline;
-    gap: 0.75rem;
+    align-items: center;
+    gap: 0.625rem;
+    flex-wrap: wrap;
 }
 
 .list-title {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--title-color);
     margin: 0;
     letter-spacing: -0.01em;
+    line-height: 1.25;
 }
 
-.record-count {
-    font-size: 0.8125rem;
+/* "N items • Sorted by X • Updated Y ago" line, matching the native list view */
+.list-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
-    font-weight: 400;
-    padding: 0.125rem 0.5rem;
-    background: var(--background-dark);
-    border-radius: 10px;
+    margin: 0;
+    line-height: 1.4;
     white-space: nowrap;
 }
 
+.meta-sep {
+    color: var(--text-muted);
+}
+
+/* slds-badge with selection accent colors */
 .selection-count {
-    font-size: 0.8125rem;
-    color: var(--primary-color);
-    font-weight: 500;
-    padding: 0.125rem 0.5rem;
-    background: var(--selection-color);
-    border-radius: 10px;
+    background-color: var(--selection-color);
+    color: var(--primary-hover);
+    font-weight: 600;
     white-space: nowrap;
 }
 
@@ -101,14 +144,15 @@
 .header-right {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
+    flex-shrink: 0;
 }
 
 /* Selection Actions */
 .selection-actions {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.375rem;
     padding-right: 0.75rem;
     border-right: 1px solid var(--border-color);
 }
@@ -120,7 +164,7 @@
 }
 
 .search-input-slds {
-    min-width: 220px;
+    min-width: 240px;
 }
 
 /* Actions Menu */
@@ -134,7 +178,7 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 .filter-bar {
-    padding: 0.75rem 1.25rem;
+    padding: 0.625rem 1.25rem 0.75rem;
     background: var(--background-light);
     border-bottom: 1px solid var(--border-color);
 }
@@ -142,7 +186,7 @@
 .filter-bar-content {
     display: flex;
     align-items: flex-end;
-    gap: 1rem;
+    gap: 0.875rem;
     flex-wrap: wrap;
 }
 
@@ -159,124 +203,6 @@
     max-width: 200px;
 }
 
-.filter-label {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    margin-bottom: 0.375rem;
-}
-
-.filter-dropdown-container {
-    position: relative;
-}
-
-.filter-dropdown-button {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    background: var(--background-white);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    text-align: left;
-}
-
-.filter-dropdown-button:hover {
-    border-color: var(--primary-color);
-}
-
-.filter-dropdown-button:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(1, 118, 211, 0.15);
-}
-
-.filter-button-label {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.filter-chevron {
-    --slds-c-icon-color-foreground-default: var(--text-muted);
-    flex-shrink: 0;
-    margin-left: 0.5rem;
-}
-
-.filter-dropdown-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    min-width: 160px;
-    max-height: 250px;
-    overflow-y: auto;
-    margin-top: 2px;
-    background: var(--background-white);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    box-shadow: var(--shadow-md);
-    z-index: 8999;
-}
-
-.filter-option {
-    display: flex;
-    align-items: center;
-    padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    transition: background-color var(--transition-fast);
-}
-
-.filter-option:hover {
-    background-color: var(--background-light);
-}
-
-.filter-checkbox {
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    margin-right: 0.5rem;
-    cursor: pointer;
-    accent-color: var(--primary-color);
-}
-
-.filter-option-label {
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    flex: 1;
-}
-
-.filter-clear-container {
-    padding: 0.5rem 0.75rem;
-    border-top: 1px solid var(--border-color);
-}
-
-.filter-clear-button {
-    width: 100%;
-    padding: 0.375rem 0.5rem;
-    background: transparent;
-    border: none;
-    color: var(--primary-color);
-    font-size: 0.8125rem;
-    font-weight: 500;
-    cursor: pointer;
-    text-align: center;
-    border-radius: 4px;
-    transition: background-color var(--transition-fast);
-}
-
-.filter-clear-button:hover {
-    background-color: var(--background-light);
-}
-
 .clear-filters-btn {
     margin-left: auto;
     flex-shrink: 0;
@@ -288,36 +214,46 @@
    Loading & Error States
    ═══════════════════════════════════════════════════════════════════ */
 
-.loading-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 3rem;
-    min-height: 200px;
+/* Skeleton loading rows - fixed soft greys, deliberately not theme hooks */
+.skeleton-bar {
+    height: 0.75rem;
+    width: 75%;
+    border-radius: 0.375rem;
+    background: linear-gradient(90deg, #f4f3f2 25%, #e9e8e7 40%, #f4f3f2 60%);
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.2s ease-in-out infinite;
 }
 
-.error-container {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 1rem 1.25rem;
-    background: #fef0f0;
-    border-bottom: 1px solid #ea001e;
-    color: #ba0517;
-    font-size: 0.875rem;
+.skeleton-row td:nth-child(odd) .skeleton-bar:not(.skeleton-bar-icon) {
+    width: 55%;
 }
 
-.error-text {
-    font-weight: 500;
+.skeleton-bar-icon {
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 50%;
+    margin: 0 auto;
+}
+
+@keyframes skeleton-shimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    Data Table
    ═══════════════════════════════════════════════════════════════════ */
 
+/* Anchors the reload spinner over the table without it scrolling away */
+.table-region {
+    position: relative;
+}
+
+/* Capped at ~10 visible rows; anything more scrolls under the sticky header */
 .table-wrapper {
     overflow: auto;
     position: relative;
+    max-height: 24rem;
 }
 
 /* Ensure last row dropdown can expand downward */
@@ -325,10 +261,9 @@
     position: relative;
 }
 
+/* slds-table provides layout/background; only density overrides live here */
 .data-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
 }
 
 .data-table-fixed {
@@ -341,51 +276,73 @@
 }
 
 .table-header-cell {
-    padding: 0.75rem 1rem;
+    position: sticky;
+    top: 0;
+    /* Above table cells, but below SLDS dropdowns/popovers (z-index ~7000)
+       so overlapping menus from other elements aren't painted under it */
+    z-index: 3;
+    padding: 0.5rem 1rem;
     text-align: left;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-secondary);
     font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    border-bottom: 2px solid var(--border-color);
+    background: var(--background-light);
+    border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
 }
 
 .table-header-cell.checkbox-cell {
     width: 48px;
-    padding: 0.75rem 0.75rem;
+    padding: 0.625rem 0.75rem;
     text-align: center;
 }
 
 /* File Icon Column Header */
 .table-header-cell.file-icon-cell {
     width: 60px;
-    padding: 0.75rem 0.5rem;
+    padding: 0.625rem 0.5rem;
     text-align: center;
 }
 
-/* Resizable header */
-.resizable-header {
-    position: relative;
-}
-
+/* Resizable header - no position override needed: .table-header-cell is
+   position: sticky, which also anchors the absolute resize handle */
 .resize-handle {
     position: absolute;
     top: 0;
-    right: -2px;
-    width: 5px;
+    right: 0;
+    width: 0.5rem;
     height: 100%;
     cursor: col-resize;
     z-index: 10;
     user-select: none;
+    /* Lets a touch drag resize the column instead of scrolling the table */
+    touch-action: none;
 }
 
-.resize-handle:hover,
-.resize-handle:active {
+/* Thin divider shown on header hover so the drag target is discoverable */
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 25%;
+    right: 0;
+    width: 1px;
+    height: 50%;
+    background-color: var(--border-color);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.table-header-cell:hover .resize-handle::after {
+    opacity: 1;
+}
+
+.resize-handle:hover::after,
+.resize-handle:active::after {
+    top: 0;
+    width: 2px;
+    height: 100%;
     background-color: var(--primary-color);
-    opacity: 0.4;
-    border-radius: 2px;
+    opacity: 1;
 }
 
 .header-cell-content {
@@ -396,6 +353,7 @@
 
 .header-label {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -404,19 +362,29 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
+    width: 1.375rem;
+    height: 1.375rem;
     border: none;
     background: transparent;
-    border-radius: 4px;
+    border-radius: 50%;
     cursor: pointer;
-    opacity: 0.4;
-    transition: all var(--transition-fast);
+    opacity: 0;
+    transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+
+.table-header-cell:hover .sort-button {
+    opacity: 0.6;
 }
 
 .sort-button:hover {
     opacity: 1;
     background: var(--background-dark);
+}
+
+.sort-button:focus-visible {
+    opacity: 1;
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
 .sort-button.active {
@@ -429,45 +397,41 @@
 }
 
 /* Table Body */
+/* Soften the slds-table_bordered row dividers */
+.data-table tbody td,
+.data-table tbody th {
+    border-color: var(--row-divider-color);
+}
+
 .table-row {
     background: var(--background-white);
     transition: background-color var(--transition-fast);
-    cursor: pointer;
 }
 
 .table-row:hover {
     background-color: var(--hover-color, #f0f7ff);
 }
 
-.table-row:nth-child(even) {
-    background: #fafaf9;
-}
-
-.table-row:nth-child(even):hover {
-    background-color: var(--hover-color, #f0f7ff);
-}
-
-/* Selected Row Styles - higher specificity to override :nth-child */
-tr.table-row.selected-row,
-tr.table-row.selected-row:nth-child(even) {
+/* Selected Row Styles - inset shadow avoids layout shift from a border */
+tr.table-row.selected-row {
     background-color: var(--selection-color);
-    border-left: 3px solid var(--selection-border);
+    box-shadow: inset 3px 0 0 var(--selection-border);
 }
 
-tr.table-row.selected-row:hover,
-tr.table-row.selected-row:nth-child(even):hover {
-    background-color: #d4e9fa;
+tr.table-row.selected-row:hover {
+    background-color: var(--selection-color-hover);
 }
 
 .table-cell {
-    padding: 0.875rem 1rem;
+    position: relative;
+    padding: 0.5rem 1rem;
     color: var(--text-primary);
-    border-bottom: 1px solid var(--border-color);
     vertical-align: middle;
     max-width: 250px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1.4;
 }
 
 /* Wrap mode - text wraps instead of clipping with ellipsis */
@@ -480,14 +444,14 @@ tr.table-row.selected-row:nth-child(even):hover {
 
 .table-cell.checkbox-cell {
     width: 48px;
-    padding: 0.875rem 0.75rem;
+    padding: 0.75rem;
     text-align: center;
 }
 
 /* File Icon Cell */
 .table-cell.file-icon-cell {
     width: 60px;
-    padding: 0.875rem 0.5rem;
+    padding: 0.75rem 0.5rem;
     text-align: center;
 }
 
@@ -519,24 +483,41 @@ tr.table-row.selected-row:nth-child(even):hover {
     z-index: 1;
 }
 
-/* Fix dropdown visibility - ensure it's not clipped by table */
+/* Fix dropdown visibility - ensure it's not clipped by the table itself.
+   Cells (td) are excluded so clip mode can truncate text; the actions cell
+   sets its own overflow: visible for the row actions dropdown. */
 .data-table,
 .data-table tbody,
-.data-table tr,
-.data-table td {
+.data-table tr {
     overflow: visible;
 }
 
-/* When hovering or focusing on actions cell, raise it above siblings */
+/* When hovering or focusing on actions cell, raise it above siblings and the sticky header */
 .actions-cell:hover,
 .actions-cell:focus-within {
-    z-index: 9999;
+    z-index: 4;
 }
 
 .cell-value {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Per-cell copy-to-clipboard (lightning-button-icon), revealed on cell hover
+   or keyboard focus - only positioning is custom */
+.cell-copy-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.25rem;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.table-cell:hover .cell-copy-btn,
+.cell-copy-btn:focus-within {
+    opacity: 1;
 }
 
 .cell-wrap .cell-value {
@@ -546,17 +527,10 @@ tr.table-row.selected-row:nth-child(even):hover {
     word-break: break-word;
 }
 
-/* Checkbox Styles */
-.row-checkbox {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    accent-color: var(--primary-color);
-}
-
-.select-all-checkbox {
-    width: 18px;
-    height: 18px;
+/* Checkbox Styles - standard lightning-input checkboxes, centered in the cell.
+   No styling-hook overrides: they should render with default SLDS contrast. */
+.table-checkbox {
+    display: inline-block;
 }
 
 /* Links */
@@ -584,31 +558,17 @@ tr.table-row.selected-row:nth-child(even):hover {
 }
 
 .boolean-false {
-    --slds-c-icon-color-foreground-default: #ba0517;
+    --slds-c-icon-color-foreground-default: #c9c9c9;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    Pills / Badges
    ═══════════════════════════════════════════════════════════════════ */
 
+/* slds-badge provides shape/typography; inline style supplies the tinted colors */
 .pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.25rem 0.625rem;
-    border-radius: 9999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
+    font-weight: 500;
     white-space: nowrap;
-    line-height: 1.2;
-    text-transform: none;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.pill:hover {
-    transform: scale(1.02);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -619,21 +579,37 @@ tr.table-row.selected-row:nth-child(even):hover {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.875rem 1.25rem;
+    padding: 0.75rem 1.25rem;
     border-top: 1px solid var(--border-color);
-    background: var(--background-light);
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    background: var(--background-white);
 }
 
 .pagination-info {
     font-size: 0.8125rem;
     color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.page-size-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.page-size-combobox {
+    width: 5rem;
+}
+
+.page-size-label {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    white-space: nowrap;
 }
 
 .pagination-controls {
     display: flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.25rem;
 }
 
 .pagination-btn-slds {
@@ -646,129 +622,27 @@ tr.table-row.selected-row:nth-child(even):hover {
     font-size: 0.8125rem;
     color: var(--text-secondary);
     font-weight: 500;
+    font-variant-numeric: tabular-nums;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    Empty State
    ═══════════════════════════════════════════════════════════════════ */
 
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 3rem 1.5rem;
-    text-align: center;
-}
-
 .empty-icon {
     --slds-c-icon-color-foreground-default: var(--text-muted);
+    display: block;
     margin-bottom: 1rem;
-    opacity: 0.5;
-}
-
-.empty-text {
-    font-size: 1rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin: 0 0 0.25rem 0;
-}
-
-.empty-subtext {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    margin: 0;
+    opacity: 0.4;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    Change Owner Modal
    ═══════════════════════════════════════════════════════════════════ */
 
-.slds-modal__header {
-    background: linear-gradient(to bottom, #ffffff 0%, #fafaf9 100%);
-}
-
-.slds-modal__title {
-    font-weight: 600;
-}
-
-.user-search-results {
-    max-height: 300px;
-    overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-}
-
-.slds-listbox__item {
-    padding: 0;
-}
-
-.user-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    cursor: pointer;
-    transition: background-color var(--transition-fast);
-    border-bottom: 1px solid var(--border-color);
-}
-
-.user-item:last-child {
-    border-bottom: none;
-}
-
-.user-item:hover {
-    background-color: var(--background-light);
-}
-
-.user-item.user-item-selected,
-.user-item.user-item-selected:hover {
-    background-color: var(--selection-color);
-}
-
-.user-info {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
-}
-
-.user-name {
-    font-weight: 500;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-}
-
-.user-email {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.user-title {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin-top: 0.125rem;
-}
-
-.selected-icon {
-    --slds-c-icon-color-foreground-default: var(--primary-color);
-}
-
-.selected-owner-display {
-    padding: 1rem;
-    background: var(--background-light);
-    border-radius: 6px;
-    border: 1px solid var(--border-color);
-}
-
-.selected-owner-card {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
+/* Room for the record picker's results dropdown to open inside the modal */
+.change-owner-modal-content {
+    min-height: 18rem;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -781,13 +655,13 @@ tr.table-row.selected-row:nth-child(even):hover {
         align-items: flex-start;
         gap: 0.75rem;
     }
-    
+
     .header-right {
         width: 100%;
         justify-content: space-between;
         flex-wrap: wrap;
     }
-    
+
     .selection-actions {
         width: 100%;
         padding-right: 0;
@@ -795,7 +669,7 @@ tr.table-row.selected-row:nth-child(even):hover {
         padding-bottom: 0.75rem;
         border-bottom: 1px solid var(--border-color);
     }
-    
+
     .search-container {
         flex: 1;
     }
@@ -804,17 +678,21 @@ tr.table-row.selected-row:nth-child(even):hover {
         width: 100%;
         min-width: unset;
     }
-    
+
     .pagination-container {
         flex-direction: column;
         gap: 0.75rem;
     }
-    
+
     .table-cell {
         padding: 0.625rem 0.75rem;
     }
-    
-    /* Hide file icon column on very small screens */
+
+    /* Sort buttons stay visible on touch devices (no hover) */
+    .sort-button {
+        opacity: 0.5;
+    }
+
     .file-icon-cell {
         display: table-cell;
     }
@@ -827,69 +705,13 @@ tr.table-row.selected-row:nth-child(even):hover {
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   Animation Classes
-   ═══════════════════════════════════════════════════════════════════ */
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(-4px);
+/* Keep sort affordance visible for keyboard/touch users regardless of hover */
+@media (hover: none) {
+    .sort-button {
+        opacity: 0.5;
     }
-    to {
+
+    .resize-handle::after {
         opacity: 1;
-        transform: translateY(0);
     }
-}
-
-.table-row {
-    animation: fadeIn 0.2s ease-out;
-}
-
-.table-row:nth-child(1) { animation-delay: 0ms; }
-.table-row:nth-child(2) { animation-delay: 20ms; }
-.table-row:nth-child(3) { animation-delay: 40ms; }
-.table-row:nth-child(4) { animation-delay: 60ms; }
-.table-row:nth-child(5) { animation-delay: 80ms; }
-.table-row:nth-child(6) { animation-delay: 100ms; }
-.table-row:nth-child(7) { animation-delay: 120ms; }
-.table-row:nth-child(8) { animation-delay: 140ms; }
-.table-row:nth-child(9) { animation-delay: 160ms; }
-.table-row:nth-child(10) { animation-delay: 180ms; }
-
-/* Selection highlight animation */
-@keyframes selectionPulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(1, 118, 211, 0.4);
-    }
-    70% {
-        box-shadow: 0 0 0 6px rgba(1, 118, 211, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(1, 118, 211, 0);
-    }
-}
-
-.row-checkbox:checked {
-    animation: selectionPulse 0.3s ease-out;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   File Type Icon Specific Styles
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* File type icon hover effect */
-.file-type-icon {
-    transition: transform var(--transition-fast);
-}
-
-.table-row:hover .file-type-icon {
-    transform: scale(1.1);
-}
-
-/* Menu divider for file actions */
-.slds-has-divider_top-space {
-    margin-top: 0.25rem;
-    padding-top: 0.25rem;
-    border-top: 1px solid var(--border-color);
 }

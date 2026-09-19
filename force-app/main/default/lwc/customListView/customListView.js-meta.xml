@@ -33,9 +33,23 @@
                 name="listViewSubtitle" 
                 type="String" 
                 label="List View Subtitle"
-                description="Smaller grey text displayed below the title and record count"
+                description="Smaller grey text displayed above the title, like the object name in standard list views (e.g. 'Cases')"
                 default=""/>
-            
+
+            <property
+                name="headerIconName"
+                type="String"
+                label="Header Icon"
+                description="Optional SLDS icon displayed next to the title, matching the standard list view header. Example: standard:case, custom:custom14, utility:pinned"
+                default=""/>
+
+            <property
+                name="headerIconBackgroundColor"
+                type="String"
+                label="Header Icon Background Color (Hex)"
+                description="Optional hex background color for the header icon. Leave blank to use the icon's default SLDS color. Example: #EA75A2"
+                default=""/>
+
             <!-- Data Visibility -->
             <property 
                 name="bypassSharing" 
@@ -101,13 +115,20 @@
                 label="Display Row Actions"
                 description="Display a row actions menu with View, Edit, and Change Owner options on each row."
                 default="true"/>
-            
+
+            <property
+                name="enableCellCopy"
+                type="Boolean"
+                label="Enable Cell Copy to Clipboard"
+                description="Show a small copy icon when hovering over a cell that copies the cell's value to the clipboard."
+                default="false"/>
+
             <!-- Pagination & Sorting -->
             <property 
                 name="recordCountPerPage" 
                 type="Integer" 
                 label="Records Per Page"
-                description="Number of records to display per page. Pagination appears if more records exist. Maximum: 200"
+                description="Default number of records per page. Users can change this via the 'per page' selector in the footer. Maximum: 200"
                 default="20"
                 min="1"
                 max="200"/>
@@ -150,7 +171,7 @@
                 name="column1PillColors" 
                 type="String" 
                 label="Column 1 - Pill Color Mapping"
-                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2. Example: Won:#2e844a,Lost:#ba0517,Pending:#fe9339"/>
+                description="Map values to colors. Format: Value1:#hex1,Value2:#hex2. Example: Won:#2e844a,Lost:#ba0517,Pending:#fe9339. Colors are rendered as a soft tint with darker matching text."/>
             
             <property 
                 name="column1FilterValues" 
